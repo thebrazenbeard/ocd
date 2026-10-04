@@ -1,0 +1,39 @@
+#!/bin/sh
+set -eu
+
+STATE_DIR="${SYNOPKG_PKGVAR}/state"
+CONFIG_FILE="${STATE_DIR}/config.json"
+BIN="${SYNOPKG_PKGDEST}/bin/ocd"
+
+mkdir -p "$STATE_DIR"
+
+if [ -f "$CONFIG_FILE" ]; then
+    exit 0
+fi
+
+share_name="${wizard_shared_folder_name:-}"
+media_type="${wizard_media_type:-}"
+mode="${wizard_mode:-observe}"
+
+if [ -z "$share_name" ] || [ -z "$media_type" ]; then
+    echo "OCD install wizard did not provide a shared folder and media type." >&2
+    exit 1
+fi
+
+share_link="/var/packages/OCD/shares/${share_name}"
+if [ ! -d "$share_link" ]; then
+    echo "OCD data-share link is unavailable: $share_link" >&2
+    exit 1
+fi
+
+"$BIN" root add \
+    --state-dir "$STATE_DIR" \
+    --path "$share_link" \
+    --type "$media_type" \
+    --mode "$mode"
+
+if [ -n "${wizard_tmdb_bearer:-}" ]; then
+    "$BIN" tmdb \
+        --state-dir "$STATE_DIR" \
+        --bearer "$wizard_tmdb_bearer"
+fi

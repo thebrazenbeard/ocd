@@ -1,0 +1,44 @@
+[compatibility]
+profile = "dsm-7.2.2+"
+strict = true
+
+[package]
+id = "OCD"
+display_name = "OCD"
+version = "0.1.0-0001"
+description = "Organized & Clean DiskStation: typed media-root watcher and safe organizer."
+maintainer = "thebrazenbeard"
+arch = ["armada38x"]
+os_min_ver = "7.2-72806"
+thirdparty = true
+precheckstartstop = true
+
+[service]
+enabled = true
+command = "bin/ocd"
+args = ["serve"]
+pid_file = "ocd.pid"
+log_file = "ocd.log"
+state_dirs = ["state"]
+start_probe_seconds = 2
+stop_timeout_seconds = 12
+
+[privilege]
+run_as = "package"
+username = "OCD"
+
+[assets]
+icon64 = "assets/PACKAGE_ICON.PNG"
+icon256 = "assets/PACKAGE_ICON_256.PNG"
+license = "assets/LICENSE"
+wizard_dir = "wizard"
+resource = "resource.json"
+
+[scripts]
+postinst = "scripts/postinst"
+
+[[payload.files]]
+source = "payload/bin/ocd"
+destination = "bin/ocd"
+mode = "0755"
+expected_elf_machine = 40
