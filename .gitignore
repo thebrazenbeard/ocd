@@ -1,0 +1,5 @@
+dist/
+package-source/payload/bin/
+ocd-state/
+*.exe
+*.test
