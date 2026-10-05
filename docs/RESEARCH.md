@@ -59,7 +59,7 @@ Synology's `data-share` resource worker can grant read/write permission to an in
 
 That design was intentionally removed in package revision `0.1.0-0002`: installation now creates no media root and requests no media-share resource. OCD starts with zero roots, and users may register any number of explicitly typed roots afterward. Each target DSM shared folder must grant the internal service account `sc-OCD` the required ACL. OCD validates access on root admission rather than running as root or silently changing DSM permissions.
 
-Synology also supports package UI shortcuts through INFO fields such as `adminport`/`adminurl`, but those fields only construct a URL to the package service; they are not treated by OCD as an authentication boundary. The v0.1 mutation API therefore remains loopback-only until an authenticated DSM-facing UI integration is separately qualified.
+Synology supports DSM desktop/package launch integration through `dsmuidir` and `dsmappname`. Synology's application-authentication guidance explicitly recommends calling `/usr/syno/synoman/webman/modules/authenticate.cgi` from a package CGI so the inherited DSM request environment can validate the current login. OCD uses that pattern instead of exposing its mutation API directly to the LAN: DSM links the packaged `app/` directory under `/webman/3rdparty/OCD`, an admin-only launcher opens `index.cgi`, and the CGI authenticates the DSM user, verifies `administrators` membership, then proxies only allowlisted OCD paths/methods to `127.0.0.1:9157`.
 
 References:
 - Synology Developer Guide: Resource / Data Share

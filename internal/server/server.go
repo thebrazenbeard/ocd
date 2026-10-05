@@ -258,7 +258,9 @@ table{border-collapse:collapse;width:100%}th,td{padding:7px;border-bottom:1px so
 <div class="card"><h2>Findings</h2><div id="findings">Loading…</div></div>
 <script>
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-async function api(url,opt){const r=await fetch(url,opt);const t=await r.text();let x={};try{x=JSON.parse(t)}catch{}if(!r.ok)throw Error(x.error||t||r.statusText);return x}
+const dsmProxy=location.pathname.includes('/webman/3rdparty/OCD/index.cgi');
+const apiURL=url=>dsmProxy?'/webman/3rdparty/OCD/index.cgi'+url:url;
+async function api(url,opt={}){const request={...opt};if(dsmProxy){request.headers={...(opt.headers||{}),'X-OCD-DSM':'1'}}const r=await fetch(apiURL(url),request);const t=await r.text();let x={};try{x=JSON.parse(t)}catch{}if(!r.ok)throw Error(x.error||t||r.statusText);return x}
 async function addRoot(){try{await api('/api/v1/roots',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path:path.value,media_type:type.value,mode:mode.value})});path.value='';await tick()}catch(e){alert(e)}}
 async function setTMDB(){try{await api('/api/v1/settings/tmdb',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({bearer:tmdb.value})});tmdb.value='';alert('Saved')}catch(e){alert(e)}}
 async function del(id){if(confirm('Remove this OCD root registration? Files are not deleted.')){await api('/api/v1/roots/'+encodeURIComponent(id),{method:'DELETE'});await tick()}}

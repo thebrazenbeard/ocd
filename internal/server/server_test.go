@@ -107,7 +107,13 @@ func TestIndexExplainsMultiRootManagement(t *testing.T) {
 		t.Fatalf("index: %d %s", rec.code, rec.body.String())
 	}
 	body := rec.body.String()
-	for _, want := range []string{"Add as many media roots as you need", "DSM ACL", "sc-OCD"} {
+	for _, want := range []string{
+		"Add as many media roots as you need",
+		"DSM ACL",
+		"sc-OCD",
+		"/webman/3rdparty/OCD/index.cgi",
+		"X-OCD-DSM",
+	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("index missing %q", want)
 		}

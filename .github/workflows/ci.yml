@@ -34,6 +34,8 @@ jobs:
         with:
           go-version: "1.23.12"
           cache: true
+      - name: Validate package contract
+        run: python3 tools/package_contract_test.py
       - name: Build and verify repository-contained SPK twice
         run: |
           VERSION="$(python3 -c 'import tomllib; print(tomllib.load(open("package-source/spk-packager.toml","rb"))["package"]["version"])')"
