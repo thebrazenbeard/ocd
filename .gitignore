@@ -3,3 +3,6 @@ package-source/payload/bin/
 ocd-state/
 *.exe
 *.test
+package-source/payload/SOURCE_PROVENANCE.json
+__pycache__/
+*.pyc

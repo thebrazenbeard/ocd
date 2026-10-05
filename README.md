@@ -4,6 +4,24 @@ OCD is a low-overhead Synology DSM daemon that watches explicitly registered med
 
 **OCD never guesses a library type.** Every watched root is explicitly registered as television, movies, or music because the parsing, metadata, and naming contracts are different.
 
+## Source and reasoning authority
+
+This repository is OCD's semantic authority. Parsing, matching, ambiguity handling, naming policy, safety decisions, mutation planning, journaling, watcher behavior, reconciliation, and API/service behavior all live here. The SPK is a compiled deployment of this repository, not a separate reasoning service.
+
+External metadata services are inputs, not policy engines: TVmaze can supply television metadata, TMDB can supply movie metadata, and embedded media tags supply v0.1 music metadata. OCD does not require BT2, Project Runner, a companion repository, or a remote database/agent for its control logic.
+
+Every provenance-bearing SPK embeds the exact Git revision it was built from and links that runtime back to `https://github.com/thebrazenbeard/ocd`.
+
+See `docs/SELF_CONTAINED_RUNTIME.md`.
+
+## Download
+
+Installable SPKs are published as GitHub Release assets:
+
+https://github.com/thebrazenbeard/ocd/releases/latest
+
+Each release also contains `SHA256SUMS`. Branch CI artifacts are qualification evidence, not the durable download surface.
+
 ## Naming contracts
 
 Television:
@@ -36,6 +54,8 @@ Track number and disc number stay in embedded music metadata; OCD does not put t
 - **Television:** TVmaze public API. No API key required.
 - **Movies:** TMDB. The user supplies a TMDB API Read Access Token.
 - **Music:** embedded Artist / Album / Title tags are authoritative in v0.1. Track/disc/year remain metadata and are not rewritten.
+
+Metadata unavailability may prevent a metadata-dependent rename. It does not delegate OCD's policy or mutation authority to the provider.
 
 ## Safety model
 
@@ -76,21 +96,34 @@ ocd root add --path /volume1/TV\ Shows --type tv --mode observe
 ocd root list
 ocd root remove --id <id>
 ocd tmdb --bearer <TMDB_API_READ_ACCESS_TOKEN>
+ocd version
 ```
 
-## Build
+## Repository-contained build
 
-OCD's DSM package is built with the qualified `thebrazenbeard/spk-packager` toolchain.
+OCD contains the packaging logic and pinned library source needed for its own build. It does not clone `spk-packager` or fetch Go module source during the build.
+
+Required local toolchains: Go 1.23+ and Python 3.11+.
+
+Linux/macOS/CI:
 
 ```text
-go test ./...
-GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build ...
-spk-packager lint package-source/spk-packager.toml
-spk-packager build ...
-spk-packager verify ...
+go test -mod=vendor ./...
+go vet -mod=vendor ./...
+bash scripts/build-spk.sh
 ```
 
-See `docs/ARCHITECTURE.md`, `docs/RESEARCH.md`, and `docs/DSM_PERMISSIONS.md`.
+Windows PowerShell:
+
+```text
+go test -mod=vendor ./...
+go vet -mod=vendor ./...
+.\scripts\build-spk.ps1
+```
+
+The SPK build refuses a dirty working tree because an artifact claiming an exact source revision must actually correspond to that revision. `ocd version` and `/api/v1/status` expose the bound source revision.
+
+See `docs/ARCHITECTURE.md`, `docs/RESEARCH.md`, `docs/DSM_PERMISSIONS.md`, and `docs/SELF_CONTAINED_RUNTIME.md`.
 
 ## Qualification states
 

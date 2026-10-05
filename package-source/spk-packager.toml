@@ -42,3 +42,11 @@ source = "payload/bin/ocd"
 destination = "bin/ocd"
 mode = "0755"
 expected_elf_machine = 40
+
+[info.extra]
+support_url = "https://github.com/thebrazenbeard/ocd"
+
+[[payload.files]]
+source = "payload/SOURCE_PROVENANCE.json"
+destination = "SOURCE_PROVENANCE.json"
+mode = "0644"

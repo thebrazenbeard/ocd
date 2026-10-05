@@ -2,11 +2,13 @@ package server
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/thebrazenbeard/ocd/internal/buildinfo"
 	"github.com/thebrazenbeard/ocd/internal/config"
 	"github.com/thebrazenbeard/ocd/internal/organizer"
 )
@@ -90,5 +92,39 @@ func TestDecodeJSONRejectsTrailingValue(t *testing.T) {
 	srv.Handler().ServeHTTP(rec, req)
 	if rec.code != http.StatusBadRequest {
 		t.Fatalf("code=%d body=%s", rec.code, rec.body.String())
+	}
+}
+
+func TestStatusReportsSourceProvenance(t *testing.T) {
+	oldVersion, oldRevision, oldSourceURL := buildinfo.Version, buildinfo.Revision, buildinfo.SourceURL
+	buildinfo.Version = "0.1.0-test"
+	buildinfo.Revision = "0123456789abcdef0123456789abcdef01234567"
+	buildinfo.SourceURL = "https://github.com/thebrazenbeard/ocd"
+	t.Cleanup(func() {
+		buildinfo.Version, buildinfo.Revision, buildinfo.SourceURL = oldVersion, oldRevision, oldSourceURL
+	})
+
+	srv, _ := testServer(t)
+	req, err := http.NewRequest(http.MethodGet, "http://localhost/api/v1/status", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := newRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.code != http.StatusOK {
+		t.Fatalf("status: %d %s", rec.code, rec.body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["source_repository"] != buildinfo.SourceURL {
+		t.Fatalf("source_repository=%v", body["source_repository"])
+	}
+	if body["source_revision"] != buildinfo.Revision {
+		t.Fatalf("source_revision=%v", body["source_revision"])
+	}
+	if body["source_revision_url"] != buildinfo.SourceURL+"/commit/"+buildinfo.Revision {
+		t.Fatalf("source_revision_url=%v", body["source_revision_url"])
 	}
 }

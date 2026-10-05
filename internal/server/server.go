@@ -53,16 +53,19 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
 	cfg := s.Config.Snapshot()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"schema_version":    1,
-		"version":           buildinfo.Version,
-		"started_at":        s.started,
-		"uptime_seconds":    int(time.Since(s.started).Seconds()),
-		"roots":             len(cfg.Roots),
-		"plans":             len(s.Organizer.Plans()),
-		"findings":          len(s.Organizer.Findings()),
-		"tmdb_configured":   strings.TrimSpace(cfg.TMDBBearer) != "",
-		"settle_seconds":    cfg.SettleSeconds,
-		"reconcile_minutes": cfg.ReconcileMinute,
+		"schema_version":      1,
+		"version":             buildinfo.Version,
+		"source_repository":   buildinfo.SourceURL,
+		"source_revision":     buildinfo.Revision,
+		"source_revision_url": buildinfo.RevisionURL(),
+		"started_at":          s.started,
+		"uptime_seconds":      int(time.Since(s.started).Seconds()),
+		"roots":               len(cfg.Roots),
+		"plans":               len(s.Organizer.Plans()),
+		"findings":            len(s.Organizer.Findings()),
+		"tmdb_configured":     strings.TrimSpace(cfg.TMDBBearer) != "",
+		"settle_seconds":      cfg.SettleSeconds,
+		"reconcile_minutes":   cfg.ReconcileMinute,
 	})
 }
 

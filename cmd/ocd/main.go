@@ -35,7 +35,8 @@ func main() {
 	case "tmdb":
 		tmdbCommand(os.Args[2:])
 	case "version":
-		fmt.Printf("ocd %s\n", buildinfo.Version)
+		fmt.Printf("ocd %s\nsource_repository %s\nsource_revision %s\nsource_revision_url %s\n",
+			buildinfo.Version, buildinfo.SourceURL, buildinfo.Revision, buildinfo.RevisionURL())
 	default:
 		log.Fatalf("unknown command %q; use serve, root, tmdb, or version", os.Args[1])
 	}
