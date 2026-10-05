@@ -6,15 +6,18 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/thebrazenbeard/ocd/internal/bootstrap"
 	"github.com/thebrazenbeard/ocd/internal/buildinfo"
 	"github.com/thebrazenbeard/ocd/internal/config"
 	"github.com/thebrazenbeard/ocd/internal/organizer"
@@ -34,11 +37,13 @@ func main() {
 		rootCommand(os.Args[2:])
 	case "tmdb":
 		tmdbCommand(os.Args[2:])
+	case "bootstrap":
+		bootstrapCommand(os.Args[2:])
 	case "version":
 		fmt.Printf("ocd %s\nsource_repository %s\nsource_revision %s\nsource_revision_url %s\n",
 			buildinfo.Version, buildinfo.SourceURL, buildinfo.Revision, buildinfo.RevisionURL())
 	default:
-		log.Fatalf("unknown command %q; use serve, root, tmdb, or version", os.Args[1])
+		log.Fatalf("unknown command %q; use serve, root, tmdb, bootstrap, or version", os.Args[1])
 	}
 }
 
@@ -49,6 +54,11 @@ func serve(args []string) {
 	_ = fs.Parse(args)
 	if !loopback(*listen) {
 		log.Fatal("refusing non-loopback HTTP bind; v0.1 administration is loopback-only")
+	}
+	if applied, err := bootstrap.Apply(*stateDir, "/var/packages/OCD/shares"); err != nil {
+		log.Fatal(err)
+	} else if applied {
+		log.Printf("applied staged DSM install configuration")
 	}
 
 	cfg, err := config.Open(filepath.Join(*stateDir, "config.json"))
@@ -174,6 +184,36 @@ func rootCommand(args []string) {
 	default:
 		log.Fatalf("unknown root command %q", args[0])
 	}
+}
+
+func bootstrapCommand(args []string) {
+	if len(args) == 0 || args[0] != "stage" {
+		log.Fatal("bootstrap requires stage")
+	}
+	fs := flag.NewFlagSet("bootstrap stage", flag.ExitOnError)
+	stateDir := fs.String("state-dir", defaultStateDir(), "state directory")
+	share := fs.String("share", "", "DSM shared-folder name")
+	mediaType := fs.String("type", "", "tv, movie, or music")
+	mode := fs.String("mode", "observe", "observe or apply")
+	readBearer := fs.Bool("tmdb-bearer-stdin", false, "read TMDB token from stdin")
+	_ = fs.Parse(args[1:])
+
+	var bearer string
+	if *readBearer {
+		data, err := io.ReadAll(io.LimitReader(os.Stdin, 64*1024))
+		if err != nil {
+			log.Fatal(err)
+		}
+		bearer = strings.TrimSpace(string(data))
+	}
+	spec := bootstrap.Spec{
+		Share: *share, MediaType: config.MediaType(*mediaType),
+		Mode: config.Mode(*mode), TMDBBearer: bearer,
+	}
+	if err := bootstrap.Stage(*stateDir, spec); err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("DSM install configuration staged")
 }
 
 func tmdbCommand(args []string) {

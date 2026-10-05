@@ -3,6 +3,7 @@ set -eu
 
 STATE_DIR="${SYNOPKG_PKGVAR}/state"
 CONFIG_FILE="${STATE_DIR}/config.json"
+BOOTSTRAP_FILE="${STATE_DIR}/bootstrap.json"
 BIN="${SYNOPKG_PKGDEST}/bin/ocd"
 
 mkdir -p "$STATE_DIR"
@@ -20,20 +21,22 @@ if [ -z "$share_name" ] || [ -z "$media_type" ]; then
     exit 1
 fi
 
-share_link="/var/packages/OCD/shares/${share_name}"
-if [ ! -d "$share_link" ]; then
-    echo "OCD data-share link is unavailable: $share_link" >&2
-    exit 1
+if [ -n "${wizard_tmdb_bearer:-}" ]; then
+    printf '%s' "$wizard_tmdb_bearer" | "$BIN" bootstrap stage \
+        --state-dir "$STATE_DIR" \
+        --share "$share_name" \
+        --type "$media_type" \
+        --mode "$mode" \
+        --tmdb-bearer-stdin
+else
+    "$BIN" bootstrap stage \
+        --state-dir "$STATE_DIR" \
+        --share "$share_name" \
+        --type "$media_type" \
+        --mode "$mode"
 fi
 
-"$BIN" root add \
-    --state-dir "$STATE_DIR" \
-    --path "$share_link" \
-    --type "$media_type" \
-    --mode "$mode"
-
-if [ -n "${wizard_tmdb_bearer:-}" ]; then
-    "$BIN" tmdb \
-        --state-dir "$STATE_DIR" \
-        --bearer "$wizard_tmdb_bearer"
+chmod 600 "$BOOTSTRAP_FILE"
+if [ "$(id -u)" = "0" ]; then
+    chown sc-OCD "$BOOTSTRAP_FILE"
 fi

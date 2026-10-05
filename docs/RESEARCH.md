@@ -61,7 +61,7 @@ Synology's `data-share` resource worker can grant read/write permission to an in
 /var/packages/<package>/shares/<share>
 ```
 
-OCD uses this for the initial install-wizard root instead of attempting privileged mount tricks or running as root.
+OCD uses this for the initial install-wizard root instead of attempting privileged mount tricks or running as root. DSM acquires the `data-share` resource during the enabled/service lifecycle rather than guaranteeing it during `postinst`, so OCD stages wizard values at install time and resolves the package share symlink on first service start. SynoCommunity's DSM 7 installer/service split follows the same lifecycle pattern: persist wizard state during installation, then resolve/use the acquired share from service setup.
 
 References:
 - Synology Developer Guide: Resource / Data Share

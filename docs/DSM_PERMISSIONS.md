@@ -6,7 +6,7 @@ Selecting or entering a path inside OCD does not magically grant filesystem righ
 
 ## Initial root
 
-The installation wizard asks for one DSM shared-folder name and media type. The SPK's `conf/resource` uses DSM's `data-share` worker to grant `sc-OCD` read/write access. DSM exposes the acquired share to the package under `/var/packages/OCD/shares/<share>`; the installer resolves and stores the real path.
+The installation wizard asks for one DSM shared-folder name and media type. The SPK's `conf/resource` uses DSM's `data-share` worker to grant `sc-OCD` read/write access. `postinst` stages the wizard values in private package state without requiring the share to exist yet. On first service start, after DSM has acquired the resource, OCD resolves `/var/packages/OCD/shares/<share>`, validates access, stores the real path, and deletes the bootstrap file only after success.
 
 ## Additional roots
 

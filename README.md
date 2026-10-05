@@ -82,7 +82,7 @@ The DSM 7.2.2+ SPK runs as the DSM internal service account `sc-OCD` (package ID
 2. its media type: television, movies, or music;
 3. observe or apply mode.
 
-The SPK declares that share through DSM's `data-share` resource worker and grants `sc-OCD` read/write access. DSM 7 creates a package share symlink under `/var/packages/OCD/shares/`; the installer resolves that to the real shared-folder path before storing the root.
+The SPK declares that share through DSM's `data-share` resource worker and grants `sc-OCD` read/write access. Installation stages the wizard choices only. On first service start—after DSM has acquired the `data-share` resource—OCD resolves `/var/packages/OCD/shares/<share>` to the real shared-folder path, validates access, persists the root, and removes the staged bootstrap only after success.
 
 Additional roots may be added later through the local API/CLI, but `sc-OCD` must separately be granted DSM shared-folder ACL access to those shares.
 
@@ -121,7 +121,7 @@ go vet -mod=vendor ./...
 .\scripts\build-spk.cmd
 ```
 
-The SPK build refuses a dirty working tree because an artifact claiming an exact source revision must actually correspond to that revision. `ocd version` and `/api/v1/status` expose the bound source revision.
+The SPK build refuses a dirty working tree because an artifact claiming an exact source revision must actually correspond to that revision. Generated provenance is written as explicit UTF-8/LF bytes so Windows and Linux builds do not diverge through host newline translation. `ocd version` and `/api/v1/status` expose the bound source revision.
 
 See `docs/ARCHITECTURE.md`, `docs/RESEARCH.md`, `docs/DSM_PERMISSIONS.md`, and `docs/SELF_CONTAINED_RUNTIME.md`.
 

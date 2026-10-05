@@ -36,7 +36,7 @@ set "PROVENANCE=%ROOT%\package-source\payload\SOURCE_PROVENANCE.json"
 if not exist "%PAYLOAD%" mkdir "%PAYLOAD%"
 if not exist "%ROOT%\dist" mkdir "%ROOT%\dist"
 
-"%PYTHON%" -c "import json,pathlib,sys; p=pathlib.Path(sys.argv[1]); p.write_text(json.dumps({'build_contract':'repo-contained','builder_go_version':sys.argv[5],'external_metadata_inputs':['TVmaze','TMDB','embedded-media-tags'],'logic_authority':'repository','product':'OCD','schema':'OCD_SOURCE_PROVENANCE_V1','source_repository':sys.argv[4],'source_revision':sys.argv[3],'source_revision_url':sys.argv[4]+'/commit/'+sys.argv[3],'version':sys.argv[2]},sort_keys=True,indent=2)+'\n',encoding='utf-8')" "%PROVENANCE%" "%VERSION%" "%REVISION%" "%SOURCE_URL%" "%GO_VERSION%"
+"%PYTHON%" -c "import json,pathlib,sys; p=pathlib.Path(sys.argv[1]); p.write_bytes((json.dumps({'build_contract':'repo-contained','builder_go_version':sys.argv[5],'external_metadata_inputs':['TVmaze','TMDB','embedded-media-tags'],'logic_authority':'repository','product':'OCD','schema':'OCD_SOURCE_PROVENANCE_V1','source_repository':sys.argv[4],'source_revision':sys.argv[3],'source_revision_url':sys.argv[4]+'/commit/'+sys.argv[3],'version':sys.argv[2]},sort_keys=True,indent=2)+'\n').encode('utf-8'))" "%PROVENANCE%" "%VERSION%" "%REVISION%" "%SOURCE_URL%" "%GO_VERSION%"
 if errorlevel 1 exit /b %errorlevel%
 
 set "CGO_ENABLED=0"

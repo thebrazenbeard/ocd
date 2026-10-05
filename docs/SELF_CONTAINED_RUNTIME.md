@@ -34,7 +34,9 @@ The repository contains:
 
 A build environment still needs the Go and Python toolchains, Git, and ordinary operating
 system utilities. Those are toolchains, not semantic/runtime dependencies. SPK builds pin
-Go 1.23.12 so the compiled payload is reproducible across qualified build environments;
+Go 1.23.12 so the compiled payload is reproducible across qualified build environments.
+Generated provenance is serialized as UTF-8 bytes with explicit LF line endings so the complete
+SPK can be byte-identical across Windows and Linux rather than only within one host OS;
 source-compatibility tests may run under newer Go versions.
 
 ## Source binding

@@ -8,6 +8,10 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "package-source" / "spk-packager.toml"
 RESOURCE = ROOT / "package-source" / "resource.json"
+POSTINST = ROOT / "package-source" / "scripts" / "postinst"
+PROVENANCE = ROOT / "package-source" / "payload" / "SOURCE_PROVENANCE.json"
+BUILD_CMD = ROOT / "scripts" / "build-spk.cmd"
+BUILD_SH = ROOT / "scripts" / "build-spk.sh"
 
 
 class PackageContractTests(unittest.TestCase):
@@ -29,6 +33,25 @@ class PackageContractTests(unittest.TestCase):
         self.assertGreater(len(shares), 0)
         for share in shares:
             self.assertIn(expected, share["permission"]["rw"])
+
+    def test_postinst_stages_bootstrap_instead_of_resolving_share(self) -> None:
+        text = POSTINST.read_text(encoding="utf-8")
+        self.assertIn("bootstrap stage", text)
+        self.assertIn("--tmdb-bearer-stdin", text)
+        self.assertNotIn("/var/packages/OCD/shares/", text)
+
+    def test_build_scripts_write_provenance_as_bytes(self) -> None:
+        for script in (BUILD_CMD, BUILD_SH):
+            text = script.read_text(encoding="utf-8")
+            self.assertIn("write_bytes", text)
+            self.assertNotIn("write_text", text)
+
+    def test_generated_provenance_uses_lf_only(self) -> None:
+        if not PROVENANCE.exists():
+            self.skipTest("provenance is generated during SPK build")
+        data = PROVENANCE.read_bytes()
+        self.assertTrue(data.endswith(b"\n"))
+        self.assertNotIn(b"\r\n", data)
 
 
 if __name__ == "__main__":
