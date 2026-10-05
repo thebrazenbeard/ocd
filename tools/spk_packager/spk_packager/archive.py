@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import gzip
+import binascii
 import io
+import struct
 import tarfile
 from dataclasses import dataclass
 from pathlib import PurePosixPath
@@ -67,12 +68,32 @@ def deterministic_tar(
     return output.getvalue()
 
 
+def _deterministic_gzip_stored(raw: bytes) -> bytes:
+    output = bytearray(b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\xff")
+    if raw:
+        offset = 0
+        while offset < len(raw):
+            chunk = raw[offset : offset + 0xFFFF]
+            offset += len(chunk)
+            final = offset == len(raw)
+            output.append(0x01 if final else 0x00)
+            length = len(chunk)
+            output.extend(struct.pack("<HH", length, length ^ 0xFFFF))
+            output.extend(chunk)
+    else:
+        output.extend(b"\x01\x00\x00\xff\xff")
+    output.extend(
+        struct.pack(
+            "<II",
+            binascii.crc32(raw) & 0xFFFFFFFF,
+            len(raw) & 0xFFFFFFFF,
+        )
+    )
+    return bytes(output)
+
+
 def deterministic_tgz(files: list[ArchiveFile] | tuple[ArchiveFile, ...]) -> bytes:
-    raw = deterministic_tar(files)
-    output = io.BytesIO()
-    with gzip.GzipFile(fileobj=output, mode="wb", filename="", mtime=0) as gz:
-        gz.write(raw)
-    return output.getvalue()
+    return _deterministic_gzip_stored(deterministic_tar(files))
 
 
 def safe_regular_members(tf: tarfile.TarFile) -> list[tarfile.TarInfo]:

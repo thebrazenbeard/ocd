@@ -46,6 +46,20 @@ class PackageContractTests(unittest.TestCase):
             self.assertIn("write_bytes", text)
             self.assertNotIn("write_text", text)
 
+    def test_packager_gzip_is_host_independent_stored_deflate(self) -> None:
+        import gzip
+        import sys
+
+        sys.path.insert(0, str(ROOT / "tools" / "spk_packager"))
+        from spk_packager.archive import ArchiveFile, deterministic_tar, deterministic_tgz
+
+        files = [ArchiveFile("fixture.bin", b"A" * 8192)]
+        blob = deterministic_tgz(files)
+        self.assertEqual(blob[:3], b"\x1f\x8b\x08")
+        self.assertEqual(blob[9], 255)
+        self.assertEqual((blob[10] >> 1) & 0x03, 0)
+        self.assertEqual(gzip.decompress(blob), deterministic_tar(files))
+
     def test_generated_provenance_uses_lf_only(self) -> None:
         if not PROVENANCE.exists():
             self.skipTest("provenance is generated during SPK build")
