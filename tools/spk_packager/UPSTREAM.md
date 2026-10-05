@@ -6,15 +6,13 @@ The `spk_packager/` package in this directory is vendored into OCD so a checkout
 Vendored source subject:
 
 - repository: `thebrazenbeard/spk-packager`
-- commit: `dbda5bca7a18d919346f52d8401a00c6fd530b88`
+- commit: `09f1e1dd79a5f7b854131e6113319b2c25ecaa84`
 - upstream version: `0.1.0`
 
 OCD intentionally does **not** import or clone that repository during its normal build.
 The source subject above records provenance for the vendored code; the OCD repository is
 the build authority for OCD releases.
 
-Local OCD divergence: `spk_packager/archive.py` replaces upstream's host-zlib gzip
-compression with a pure-Python DEFLATE stored-block gzip writer. The tar bytes, gzip
-header/trailer, block boundaries, CRC, and size are therefore determined by repository
-code rather than the host zlib build. This intentionally increases SPK size to obtain
-cross-host byte reproducibility.
+The vendored `spk_packager/` directory is intended to match upstream `src/spk_packager/`
+byte-for-byte at the pinned commit. OCD-specific packaging policy belongs in OCD's manifest,
+build scripts, and package contract tests rather than in an undocumented fork of the packager.

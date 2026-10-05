@@ -75,8 +75,7 @@ def _deterministic_gzip_stored(raw: bytes) -> bytes:
         while offset < len(raw):
             chunk = raw[offset : offset + 0xFFFF]
             offset += len(chunk)
-            final = offset == len(raw)
-            output.append(0x01 if final else 0x00)
+            output.append(0x01 if offset == len(raw) else 0x00)
             length = len(chunk)
             output.extend(struct.pack("<HH", length, length ^ 0xFFFF))
             output.extend(chunk)
