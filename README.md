@@ -76,15 +76,11 @@ Apply mode is fail-closed:
 
 ## DSM package behavior
 
-The DSM 7.2.2+ SPK runs as the DSM internal service account `sc-OCD` (package ID `OCD`). During first installation, the wizard asks for:
+The DSM 7.2.2+ SPK runs as the DSM internal service account `sc-OCD` (package ID `OCD`).
 
-1. an initial DSM shared-folder name;
-2. its media type: television, movies, or music;
-3. observe or apply mode.
+Installation does **not** require a media folder. OCD starts cleanly with zero registered roots. After installation, add as many television, movie, and music roots as you need through OCD's root manager/API/CLI. Every root has its own explicit media type and Observe/Apply mode.
 
-The SPK declares that share through DSM's `data-share` resource worker and grants `sc-OCD` read/write access. Installation stages the wizard choices only. On first service start—after DSM has acquired the `data-share` resource—OCD resolves `/var/packages/OCD/shares/<share>` to the real shared-folder path, validates access, persists the root, and removes the staged bootstrap only after success.
-
-Additional roots may be added later through the local API/CLI, but `sc-OCD` must separately be granted DSM shared-folder ACL access to those shares.
+Before a root can be registered, `sc-OCD` must have the necessary DSM shared-folder ACL access. OCD validates access when the root is added; it does not run as root or silently alter DSM permissions.
 
 The administration/API server is loopback-only by default at `127.0.0.1:9157`. This is deliberate: v0.1 does not expose unauthenticated mutation endpoints to the LAN.
 

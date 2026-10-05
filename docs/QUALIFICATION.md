@@ -31,4 +31,6 @@ A candidate may advance SOURCE/SPK states only when the evidence names the exact
 
 DSM installation is not attempted until the exact current artifact has passed source tests, strict package verification, reproducibility checks, and lifecycle review. DSM runtime/application states remain open until read back from the NAS.
 
+The user installed the earlier `0.1.0-0001` q1 artifact derived from `8ea37597f2bb655dcff8de1a4eeb67322ec387c9`. That fact is useful installation history but does not qualify the newer `0.1.0-0002` multi-root installer candidate; the latter requires its own exact-artifact DSM readback.
+
 See `docs/CONTINUATION_20261004_V1.md` for durable continuation context.

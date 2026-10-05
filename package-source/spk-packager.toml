@@ -5,7 +5,7 @@ strict = true
 [package]
 id = "OCD"
 display_name = "OCD"
-version = "0.1.0-0001"
+version = "0.1.0-0002"
 description = "Organized & Clean DiskStation: typed media-root watcher and safe organizer."
 maintainer = "thebrazenbeard"
 arch = ["armada38x"]
@@ -31,11 +31,6 @@ username = "sc-OCD"
 icon64 = "assets/PACKAGE_ICON.PNG"
 icon256 = "assets/PACKAGE_ICON_256.PNG"
 license = "assets/LICENSE"
-wizard_dir = "wizard"
-resource = "resource.json"
-
-[scripts]
-postinst = "scripts/postinst"
 
 [[payload.files]]
 source = "payload/bin/ocd"

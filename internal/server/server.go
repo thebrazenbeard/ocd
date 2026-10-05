@@ -239,6 +239,8 @@ table{border-collapse:collapse;width:100%}th,td{padding:7px;border-bottom:1px so
 <div class="card"><b>Root contract:</b> every watched folder is explicitly Television, Movies, or Music. OCD never guesses.</div>
 <div class="card">
 <h2>Add media root</h2>
+<div><b>Add as many media roots as you need.</b> Each root keeps its own media type and Observe/Apply mode.</div>
+<div class="muted">Before adding a root, grant DSM shared-folder access to the system internal user <code>sc-OCD</code>. OCD validates the DSM ACL when you register it.</div>
 <input id="path" type="text" placeholder="/volume1/TV Shows">
 <select id="type"><option value="tv">Television</option><option value="movie">Movies</option><option value="music">Music</option></select>
 <select id="mode"><option value="observe">Observe only</option><option value="apply">Apply renames</option></select>

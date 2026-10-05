@@ -13,7 +13,7 @@ When that command is supplied in a new chat, recover current state from GitHub b
 - Draft PR: #1 — `Build OCD v0.1 DSM media organizer`
 - Architecture baseline on `main`: `30c49f0a5ebe99d217e66e985893b3b109dc2e2f`
 - Executable implementation parent before this continuation checkpoint: `21b2919134daa4ea45f57df8e25561c33eb97e6b`
-- Qualified SPK Packager source pinned by CI: `thebrazenbeard/spk-packager@dbda5bca7a18d919346f52d8401a00c6fd530b88`
+- Qualified SPK Packager source pinned by the current repo-contained build: `thebrazenbeard/spk-packager@09f1e1dd79a5f7b854131e6113319b2c25ecaa84`
 
 Always fetch/read the live branch and PR first because the branch may advance after this checkpoint.
 
@@ -82,15 +82,11 @@ Target baseline: DSM 7.2.2+, DS216 / `armada38x` first live target.
 
 The package runs as the DSM internal package user, not root.
 
-Install wizard asks for:
-1. DSM shared-folder name;
-2. media type: television / movies / music;
-3. mutation mode: observe / apply;
-4. optional TMDB bearer token.
+Beginning with package revision `0.1.0-0002`, installation does not require or create a media root. OCD starts with zero roots. The user may add any number of television, movie, and music roots afterward through the root manager/API/CLI; every root retains an explicit type and independent Observe/Apply mode.
 
-The SPK uses DSM's `data-share` resource worker to grant the DSM internal service account `sc-OCD` read/write access to the initial share. `postinst` resolves `/var/packages/OCD/shares/<share>` and stores that root. Additional roots require `sc-OCD` to have DSM shared-folder ACL access.
+OCD does not run as root and does not silently modify DSM shared-folder permissions. Before a root can be registered, the DSM internal service account `sc-OCD` must have the necessary ACL on that shared folder; OCD validates access during admission.
 
-SPK manifest version is currently `0.1.0-0001`.
+SPK manifest version is currently `0.1.0-0002`.
 
 ## Historical qualification evidence
 
@@ -130,14 +126,15 @@ No lower state implies a higher state.
 2. Re-run exact-head CI/build verification if the branch has moved.
 3. Obtain/download the exact qualified SPK artifact for the current head.
 4. Install OCD on the user's DS216 / DSM 7.2.2 target using the existing live DSM access path.
-5. During installation, select an appropriate existing shared folder and explicitly choose its type. Prefer `observe` for first live qualification unless the live user explicitly selects `apply`.
+5. Install/upgrade the exact qualified SPK without selecting a media root; verify the package starts with zero roots on a fresh state.
 6. Verify installed INFO/version/arch/artifact identity.
 7. Verify DSM package unit, daemon process identity, package-user identity, loopback `/healthz`, `/api/v1/status`, and root configuration.
-8. Measure CPU/RSS overhead.
-9. Exercise observe behavior on controlled media fixtures for TV, movie, and music naming.
-10. Only after observed plans are correct, exercise controlled apply behavior; verify no overwrite, sidecar movement, journal receipts, watcher suppression, and restart/reconciliation.
-11. Update `docs/QUALIFICATION.md` with exact artifact/runtime evidence.
-12. Keep PR #1 draft unless the live user separately authorizes merge to `main`.
+8. Grant `sc-OCD` ACL access to controlled test shares, then add multiple explicitly typed roots in Observe mode and verify they coexist independently.
+9. Measure CPU/RSS overhead.
+10. Exercise observe behavior on controlled media fixtures for TV, movie, and music naming.
+11. Only after observed plans are correct, exercise controlled apply behavior; verify no overwrite, sidecar movement, journal receipts, watcher suppression, and restart/reconciliation.
+12. Update `docs/QUALIFICATION.md` with exact artifact/runtime evidence.
+13. Keep PR #1 draft unless the live user separately authorizes merge to `main`.
 
 ## Authority carried by the continuation command
 

@@ -55,13 +55,11 @@ OCD deliberately does **not** import their broader download-client/indexer/libra
 
 DSM 7 packages are expected to run as non-root internal package users. SynoCommunity's current DSM 7 packaging convention names the effective account `sc-<package>`; for OCD that is `sc-OCD`. Shared-folder access is a separate ACL/resource concern.
 
-Synology's `data-share` resource worker can grant read/write permission to an internal package user and, since DSM 7.0-41201, creates a symlink under:
+Synology's `data-share` resource worker can grant read/write permission to an internal package user and create package-local share links. OCD previously used that mechanism for a single install-wizard root.
 
-```
-/var/packages/<package>/shares/<share>
-```
+That design was intentionally removed in package revision `0.1.0-0002`: installation now creates no media root and requests no media-share resource. OCD starts with zero roots, and users may register any number of explicitly typed roots afterward. Each target DSM shared folder must grant the internal service account `sc-OCD` the required ACL. OCD validates access on root admission rather than running as root or silently changing DSM permissions.
 
-OCD uses this for the initial install-wizard root instead of attempting privileged mount tricks or running as root. DSM acquires the `data-share` resource during the enabled/service lifecycle rather than guaranteeing it during `postinst`, so OCD stages wizard values at install time and resolves the package share symlink on first service start. SynoCommunity's DSM 7 installer/service split follows the same lifecycle pattern: persist wizard state during installation, then resolve/use the acquired share from service setup.
+Synology also supports package UI shortcuts through INFO fields such as `adminport`/`adminurl`, but those fields only construct a URL to the package service; they are not treated by OCD as an authentication boundary. The v0.1 mutation API therefore remains loopback-only until an authenticated DSM-facing UI integration is separately qualified.
 
 References:
 - Synology Developer Guide: Resource / Data Share

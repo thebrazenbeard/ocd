@@ -95,6 +95,25 @@ func TestDecodeJSONRejectsTrailingValue(t *testing.T) {
 	}
 }
 
+func TestIndexExplainsMultiRootManagement(t *testing.T) {
+	srv, _ := testServer(t)
+	req, err := http.NewRequest(http.MethodGet, "http://localhost/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := newRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.code != http.StatusOK {
+		t.Fatalf("index: %d %s", rec.code, rec.body.String())
+	}
+	body := rec.body.String()
+	for _, want := range []string{"Add as many media roots as you need", "DSM ACL", "sc-OCD"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("index missing %q", want)
+		}
+	}
+}
+
 func TestStatusReportsSourceProvenance(t *testing.T) {
 	oldVersion, oldRevision, oldSourceURL := buildinfo.Version, buildinfo.Revision, buildinfo.SourceURL
 	buildinfo.Version = "0.1.0-test"

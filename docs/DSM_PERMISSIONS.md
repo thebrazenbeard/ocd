@@ -4,13 +4,11 @@ OCD runs as the DSM 7 internal package service account `sc-OCD` (package ID `OCD
 
 Selecting or entering a path inside OCD does not magically grant filesystem rights.
 
-## Initial root
+## Root access
 
-The installation wizard asks for one DSM shared-folder name and media type. The SPK's `conf/resource` uses DSM's `data-share` worker to grant `sc-OCD` read/write access. `postinst` stages the wizard values in private package state without requiring the share to exist yet. On first service start, after DSM has acquired the resource, OCD resolves `/var/packages/OCD/shares/<share>`, validates access, stores the real path, and deletes the bootstrap file only after success.
+OCD installation does not select or grant access to a media share. The package starts with zero roots.
 
-## Additional roots
-
-For additional existing shared folders:
+For every DSM shared folder you want OCD to manage:
 
 1. DSM Control Panel → Shared Folder.
 2. Edit the target share.
@@ -18,9 +16,9 @@ For additional existing shared folders:
 4. Change the account selector to **System internal user**.
 5. Find **sc-OCD** (DSM may display it as the OCD system-internal package account).
 6. Grant **Read/Write** if the root will use apply mode, or at minimum read/traverse for observe-only use.
-7. Add the root through OCD.
+7. Add the root through OCD's root manager/API/CLI.
 
-OCD independently probes permissions when a root is registered. Apply mode is rejected when a create/remove probe fails.
+Repeat this for as many TV, movie, and music roots as you need. OCD independently probes permissions when each root is registered. Apply mode is rejected when a create/remove probe fails.
 
 ## Why not root
 
