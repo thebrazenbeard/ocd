@@ -12,6 +12,7 @@ WIZARD = ROOT / "package-source" / "wizard" / "install_uifile"
 PROVENANCE = ROOT / "package-source" / "payload" / "SOURCE_PROVENANCE.json"
 BUILD_CMD = ROOT / "scripts" / "build-spk.cmd"
 BUILD_SH = ROOT / "scripts" / "build-spk.sh"
+CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 
 
 class PackageContractTests(unittest.TestCase):
@@ -38,6 +39,16 @@ class PackageContractTests(unittest.TestCase):
 
     def test_package_revision_advances_past_single_root_installer(self) -> None:
         self.assertEqual(self.manifest["package"]["version"], "0.1.0-0002")
+
+    def test_ci_uploads_canonical_spk_and_hides_repro_copy(self) -> None:
+        text = CI_WORKFLOW.read_text(encoding="utf-8")
+        self.assertNotIn("package-source/scripts/postinst", text)
+        self.assertIn('PRIMARY="dist/OCD-armada38x-$VERSION.spk"', text)
+        self.assertIn('REPRO="dist/OCD-repro-check.spk"', text)
+        self.assertIn("cmp "$PRIMARY" "$REPRO"", text)
+        self.assertIn("path: dist/OCD-armada38x-*.spk", text)
+        self.assertNotIn("OCD-a.spk", text)
+        self.assertNotIn("OCD-b.spk", text)
 
     def test_build_scripts_write_provenance_as_bytes(self) -> None:
         for script in (BUILD_CMD, BUILD_SH):
