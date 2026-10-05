@@ -40,8 +40,8 @@ class PackageContractTests(unittest.TestCase):
         self.assertFalse(POSTINST.exists())
         self.assertFalse(WIZARD.exists())
 
-    def test_package_revision_advances_past_single_root_installer(self) -> None:
-        self.assertEqual(self.manifest["package"]["version"], "0.1.0-0002")
+    def test_gui_package_revision_advances_installed_multi_root_build(self) -> None:
+        self.assertEqual(self.manifest["package"]["version"], "0.1.0-0003")
 
     def test_dsm_admin_ui_is_packaged_and_loopback_proxied(self) -> None:
         info = self.manifest["info"]["extra"]

@@ -86,7 +86,7 @@ Beginning with package revision `0.1.0-0002`, installation does not require or c
 
 OCD does not run as root and does not silently modify DSM shared-folder permissions. Before a root can be registered, the DSM internal service account `sc-OCD` must have the necessary ACL on that shared folder; OCD validates access during admission.
 
-SPK manifest version is currently `0.1.0-0002`.
+The user's DS216 currently has `0.1.0-0002` installed and running without a DSM launcher. SPK manifest version `0.1.0-0003` adds the DSM-authenticated management launcher while preserving the zero-root/multi-root model.
 
 ## Historical qualification evidence
 
@@ -126,7 +126,7 @@ No lower state implies a higher state.
 2. Re-run exact-head CI/build verification if the branch has moved.
 3. Obtain/download the exact qualified SPK artifact for the current head.
 4. Install OCD on the user's DS216 / DSM 7.2.2 target using the existing live DSM access path.
-5. Install/upgrade the exact qualified SPK without selecting a media root; verify the package starts with zero roots on a fresh state.
+5. Upgrade the installed `0.1.0-0002` package to the exact qualified `0.1.0-0003` SPK; verify DSM exposes the OCD launcher/Open action and preserves the zero-root/multi-root state model.
 6. Verify installed INFO/version/arch/artifact identity.
 7. Verify DSM package unit, daemon process identity, package-user identity, loopback `/healthz`, `/api/v1/status`, and root configuration.
 8. Grant `sc-OCD` ACL access to controlled test shares, then add multiple explicitly typed roots in Observe mode and verify they coexist independently.
