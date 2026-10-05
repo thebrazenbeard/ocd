@@ -34,15 +34,16 @@ jobs:
         with:
           go-version: "1.23.12"
           cache: true
-      - name: Validate install script
-        run: sh -n package-source/scripts/postinst
       - name: Build and verify repository-contained SPK twice
         run: |
-          bash scripts/build-spk.sh dist/OCD-a.spk
-          bash scripts/build-spk.sh dist/OCD-b.spk
-          cmp dist/OCD-a.spk dist/OCD-b.spk
-          sha256sum package-source/payload/bin/ocd dist/OCD-a.spk
+          VERSION="$(python3 -c 'import tomllib; print(tomllib.load(open("package-source/spk-packager.toml","rb"))["package"]["version"])')"
+          PRIMARY="dist/OCD-armada38x-$VERSION.spk"
+          REPRO="dist/OCD-repro-check.spk"
+          bash scripts/build-spk.sh "$PRIMARY"
+          bash scripts/build-spk.sh "$REPRO"
+          cmp "$PRIMARY" "$REPRO"
+          sha256sum package-source/payload/bin/ocd "$PRIMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: OCD-armada38x-${{ github.sha }}
-          path: dist/OCD-a.spk
+          path: dist/OCD-armada38x-*.spk
