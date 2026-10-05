@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version: ["1.23.x", "1.24.x", "1.25.x"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+          cache: true
+      - name: Test repository-contained source
+        env:
+          GOFLAGS: -mod=vendor
+        run: |
+          go test ./...
+          go vet ./...
+
+  spk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.12"
+          cache: true
+      - name: Validate package contract
+        run: python3 tools/package_contract_test.py
+      - name: Build and verify repository-contained SPK twice
+        run: |
+          VERSION="$(python3 -c 'import tomllib; print(tomllib.load(open("package-source/spk-packager.toml","rb"))["package"]["version"])')"
+          PRIMARY="dist/OCD-armada38x-$VERSION.spk"
+          REPRO="dist/OCD-repro-check.spk"
+          bash scripts/build-spk.sh "$PRIMARY"
+          bash scripts/build-spk.sh "$REPRO"
+          cmp "$PRIMARY" "$REPRO"
+          sha256sum package-source/payload/bin/ocd "$PRIMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OCD-armada38x-${{ github.sha }}
+          path: dist/OCD-armada38x-*.spk

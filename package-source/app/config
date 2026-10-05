@@ -1,0 +1,11 @@
+{
+  ".url": {
+    "com.thebrazenbeard.ocd": {
+      "type": "url",
+      "icon": "images/OCD-{0}.png",
+      "title": "OCD",
+      "desc": "Organized & Clean DiskStation",
+      "url": "3rdparty/ocd/index.cgi?path=/"
+    }
+  }
+}

@@ -1,0 +1,47 @@
+name: Release SPK
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.12"
+          cache: true
+      - name: Verify release tag matches package version
+        id: version
+        run: |
+          VERSION="$(python3 -c 'import tomllib; print(tomllib.load(open("package-source/spk-packager.toml","rb"))["package"]["version"])')"
+          test "$GITHUB_REF_NAME" = "v$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Build and verify self-contained SPK
+        run: |
+          bash scripts/build-spk.sh "dist/OCD-armada38x-${{ steps.version.outputs.version }}.spk"
+          (
+            cd dist
+            sha256sum "OCD-armada38x-${{ steps.version.outputs.version }}.spk" > SHA256SUMS
+          )
+      - name: Publish downloadable repository release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SPK="dist/OCD-armada38x-${{ steps.version.outputs.version }}.spk"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$SPK" dist/SHA256SUMS --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "$SPK" dist/SHA256SUMS \
+              --verify-tag \
+              --title "OCD ${{ steps.version.outputs.version }}" \
+              --notes "Repository-contained OCD SPK built from commit $GITHUB_SHA. Source: https://github.com/thebrazenbeard/ocd/commit/$GITHUB_SHA"
+          fi

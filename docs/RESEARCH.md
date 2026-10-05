@@ -53,17 +53,19 @@ OCD deliberately does **not** import their broader download-client/indexer/libra
 
 ## DSM package permissions
 
-DSM 7 packages are expected to run as non-root internal package users. Shared-folder access is a separate ACL/resource concern.
+DSM 7 packages are expected to run as non-root internal package users. SynoCommunity's current DSM 7 packaging convention names the effective account `sc-<package>`; for OCD that is `sc-OCD`. Shared-folder access is a separate ACL/resource concern.
 
-Synology's `data-share` resource worker can grant read/write permission to an internal package user and, since DSM 7.0-41201, creates a symlink under:
+Synology's `data-share` resource worker can grant read/write permission to an internal package user and create package-local share links. OCD previously used that mechanism for a single install-wizard root.
 
-```
-/var/packages/<package>/shares/<share>
-```
+That design was intentionally removed in package revision `0.1.0-0002`: installation now creates no media root and requests no media-share resource. OCD starts with zero roots, and users may register any number of explicitly typed roots afterward. Each target DSM shared folder must grant the internal service account `sc-OCD` the required ACL. OCD validates access on root admission rather than running as root or silently changing DSM permissions.
 
-OCD uses this for the initial install-wizard root instead of attempting privileged mount tricks or running as root.
+Synology supports DSM desktop/package launch integration through `dsmuidir` and `dsmappname`. Synology's application-authentication guidance explicitly recommends calling `/usr/syno/synoman/webman/modules/authenticate.cgi` from a package CGI so the inherited DSM request environment can validate the current login. OCD uses that pattern instead of exposing its mutation API directly to the LAN: DSM links the packaged `app/` directory under `/webman/3rdparty/<linkname>`, an admin-only launcher opens `index.cgi`, and the CGI authenticates the DSM user, verifies `administrators` membership, then proxies only allowlisted OCD paths/methods to `127.0.0.1:9157`.
+
+Live DSM qualification of `0.1.0-0003` exposed a route bug: the CGI executed (unauthenticated requests reached its 403 guard), but authenticated requests fell through the `PATH_INFO` allowlist and DSM rendered the resulting 404. Package revision `0.1.0-0004` removes the `PATH_INFO` dependency, uses an explicit `?path=` route, and uses Synology's documented relative `3rdparty/ocd/index.cgi` launcher URL form.
 
 References:
 - Synology Developer Guide: Resource / Data Share
-- `SynoCommunity/spksrc` DSM 7 permission and resource documentation
+- `SynoCommunity/spksrc` DSM 7 permission, service-account, deterministic packaging, and resource conventions
+- `SynoCommunity/spkrepo` and `jdel/sspks` for Package Center repository/feed behavior (distribution layer only)
+- `john-shine/synology-baiduNetdisk-package` as a legacy hand-built SPK comparison; its DSM 7 limitations are not adopted
 - `thebrazenbeard/spk-packager` qualified DSM packaging framework

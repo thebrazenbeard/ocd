@@ -1,0 +1,94 @@
+[compatibility]
+profile = "dsm-7.2.2+"
+strict = true
+
+[package]
+id = "OCD"
+display_name = "OCD"
+version = "0.1.0-0004"
+description = "Organized & Clean DiskStation: typed media-root watcher and safe organizer."
+maintainer = "thebrazenbeard"
+arch = ["armada38x"]
+os_min_ver = "7.2-72806"
+thirdparty = true
+precheckstartstop = true
+
+[service]
+enabled = true
+command = "bin/ocd"
+args = ["serve"]
+pid_file = "ocd.pid"
+log_file = "ocd.log"
+state_dirs = ["state"]
+start_probe_seconds = 2
+stop_timeout_seconds = 12
+
+[privilege]
+run_as = "package"
+username = "sc-OCD"
+
+[assets]
+icon64 = "assets/PACKAGE_ICON.PNG"
+icon256 = "assets/PACKAGE_ICON_256.PNG"
+license = "assets/LICENSE"
+
+[[payload.files]]
+source = "payload/bin/ocd"
+destination = "bin/ocd"
+mode = "0755"
+expected_elf_machine = 40
+
+[info.extra]
+dsmappname = "com.thebrazenbeard.ocd"
+dsmuidir = "app"
+support_url = "https://github.com/thebrazenbeard/ocd"
+
+[[payload.files]]
+source = "payload/SOURCE_PROVENANCE.json"
+destination = "SOURCE_PROVENANCE.json"
+mode = "0644"
+
+[[payload.files]]
+source = "app/config"
+destination = "app/config"
+mode = "0644"
+
+[[payload.files]]
+source = "app/index.cgi"
+destination = "app/index.cgi"
+mode = "0755"
+
+[[payload.files]]
+source = "assets/PACKAGE_ICON.PNG"
+destination = "app/images/OCD-16.png"
+mode = "0644"
+
+[[payload.files]]
+source = "assets/PACKAGE_ICON.PNG"
+destination = "app/images/OCD-24.png"
+mode = "0644"
+
+[[payload.files]]
+source = "assets/PACKAGE_ICON.PNG"
+destination = "app/images/OCD-32.png"
+mode = "0644"
+
+[[payload.files]]
+source = "assets/PACKAGE_ICON.PNG"
+destination = "app/images/OCD-48.png"
+mode = "0644"
+
+[[payload.files]]
+source = "assets/PACKAGE_ICON.PNG"
+destination = "app/images/OCD-64.png"
+mode = "0644"
+
+[[payload.files]]
+source = "assets/PACKAGE_ICON.PNG"
+destination = "app/images/OCD-72.png"
+mode = "0644"
+
+[[payload.files]]
+source = "assets/PACKAGE_ICON_256.PNG"
+destination = "app/images/OCD-256.png"
+mode = "0644"
