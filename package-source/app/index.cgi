@@ -26,7 +26,15 @@ printf '%s\n' "$GROUPS" | tr ' ' '\n' | grep -qx 'administrators' ||
     respond "403 Forbidden" "DSM administrator access required"
 
 METHOD="${REQUEST_METHOD:-GET}"
-REQUEST_PATH="${PATH_INFO:-/}"
+QUERY="${QUERY_STRING:-}"
+case "$QUERY" in
+    "") REQUEST_PATH="/" ;;
+    path=*) REQUEST_PATH="${QUERY#path=}" ;;
+    *) respond "400 Bad Request" "Invalid OCD route query" ;;
+esac
+case "$REQUEST_PATH" in
+    *'&'*|*'='*) respond "400 Bad Request" "Invalid OCD route" ;;
+esac
 
 case "$METHOD" in
     GET|POST|PUT|DELETE) ;;

@@ -5,7 +5,7 @@
       "icon": "images/OCD-{0}.png",
       "title": "OCD",
       "desc": "Organized & Clean DiskStation",
-      "url": "/webman/3rdparty/OCD/index.cgi"
+      "url": "3rdparty/ocd/index.cgi?path=/"
     }
   }
 }

@@ -82,7 +82,7 @@ Installation does **not** require a media folder. OCD starts cleanly with zero r
 
 Before a root can be registered, `sc-OCD` must have the necessary DSM shared-folder ACL access. OCD validates access when the root is added; it does not run as root or silently alter DSM permissions.
 
-The daemon administration/API server remains loopback-only at `127.0.0.1:9157`. The SPK installs an admin-only OCD launcher in DSM. Its package CGI reuses DSM's authenticated session, verifies membership in the DSM `administrators` group, applies a mutation-header/body-size guard, and proxies only the known OCD endpoints to the loopback daemon. OCD does not expose an unauthenticated mutation port to the LAN.
+The daemon administration/API server remains loopback-only at `127.0.0.1:9157`. The SPK installs an admin-only OCD launcher in DSM. Its package CGI reuses DSM's authenticated session, verifies membership in the DSM `administrators` group, applies a mutation-header/body-size guard, and proxies only allowlisted OCD endpoints to the loopback daemon through an explicit `?path=` route. The launcher uses DSM's documented relative `3rdparty/ocd/...` URL form. OCD does not expose an unauthenticated mutation port to the LAN.
 
 ## CLI
 

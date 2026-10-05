@@ -111,7 +111,7 @@ func TestIndexExplainsMultiRootManagement(t *testing.T) {
 		"Add as many media roots as you need",
 		"DSM ACL",
 		"sc-OCD",
-		"/webman/3rdparty/OCD/index.cgi",
+		"/webman/3rdparty/ocd/index.cgi?path=",
 		"X-OCD-DSM",
 	} {
 		if !strings.Contains(body, want) {

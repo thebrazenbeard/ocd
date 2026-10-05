@@ -31,6 +31,6 @@ A candidate may advance SOURCE/SPK states only when the evidence names the exact
 
 DSM installation is not attempted until the exact current artifact has passed source tests, strict package verification, reproducibility checks, and lifecycle review. DSM runtime/application states remain open until read back from the NAS.
 
-The user's DS216 currently has `0.1.0-0002` installed and running. That installed build established the zero-root/multi-root package revision but does not contain the DSM launcher added afterward. The DSM-GUI upgrade is therefore versioned `0.1.0-0003` and requires its own exact-artifact install/runtime readback.
+The user's DS216 was upgraded through `0.1.0-0003`. DSM reports `0003` installed and running and exposes the OCD Open action, but live launcher qualification FAILS for that subject: authenticated requests to the packaged CGI reach a route mismatch and DSM renders a 404. The repair is versioned `0.1.0-0004`, which replaces the CGI's `PATH_INFO` routing with an explicit `?path=` contract and requires its own exact-artifact install/runtime readback.
 
 See `docs/CONTINUATION_20261004_V1.md` for durable continuation context.

@@ -41,7 +41,7 @@ class PackageContractTests(unittest.TestCase):
         self.assertFalse(WIZARD.exists())
 
     def test_gui_package_revision_advances_installed_multi_root_build(self) -> None:
-        self.assertEqual(self.manifest["package"]["version"], "0.1.0-0003")
+        self.assertEqual(self.manifest["package"]["version"], "0.1.0-0004")
 
     def test_dsm_admin_ui_is_packaged_and_loopback_proxied(self) -> None:
         info = self.manifest["info"]["extra"]
@@ -60,15 +60,18 @@ class PackageContractTests(unittest.TestCase):
         app = json.loads(APP_CONFIG.read_text(encoding="utf-8"))[".url"][
             "com.thebrazenbeard.ocd"
         ]
-        self.assertEqual(app["url"], "/webman/3rdparty/OCD/index.cgi")
+        self.assertEqual(app["url"], "3rdparty/ocd/index.cgi?path=/")
         self.assertNotIn("allUsers", app)
 
         cgi = APP_CGI.read_text(encoding="utf-8")
+        self.assertNotIn("PATH_INFO", cgi)
         for required in (
             "/usr/syno/synoman/webman/modules/authenticate.cgi",
             "administrators",
             "127.0.0.1:9157",
             "HTTP_X_OCD_DSM",
+            "QUERY_STRING",
+            "path=",
             "1048576",
         ):
             self.assertIn(required, cgi)
