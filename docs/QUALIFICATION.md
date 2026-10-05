@@ -1,31 +1,34 @@
 # Qualification
 
-No lower state implies a higher state.
+No lower state implies a higher state. Qualification belongs to an exact source/artifact subject.
 
 | State | Meaning | Current |
 |---|---|---|
-| SOURCE_VALIDATED | source compiles/tests and hostile checks pass | PASS @ `21b2919134daa4ea45f57df8e25561c33eb97e6b` |
-| SPK_STRUCTURALLY_VERIFIED | SPK Packager strict verifier passes | PASS — SPK SHA-256 `7a9fcea97bafc940eb1593eca957499863c16cca07d1fe9500385e8f7d097ebe` |
-| SPK_REPRODUCIBLE | two independent package builds are byte-identical | PASS @ implementation subject `21b2919134daa4ea45f57df8e25561c33eb97e6b` |
+| SOURCE_VALIDATED | exact source compiles/tests and hostile checks pass | MUST MATCH CURRENT HEAD |
+| SPK_STRUCTURALLY_VERIFIED | strict SPK verification passes for the exact artifact | MUST MATCH CURRENT HEAD |
+| SPK_REPRODUCIBLE | independent qualified builds are byte-identical | MUST MATCH CURRENT HEAD |
 | DSM_INSTALLED | exact qualified SPK installed on a named DSM subject | PENDING |
 | DSM_RUNTIME_VERIFIED | DSM unit, process, API, package identity verified live | PENDING |
 | APPLICATION_BEHAVIOR_VERIFIED | observe/apply behavior verified on controlled media fixtures/live root | PENDING |
 
-## Exact source/package evidence
+## Historical package evidence
 
-Implementation subject: `21b2919134daa4ea45f57df8e25561c33eb97e6b`.
+Implementation subject `21b2919134daa4ea45f57df8e25561c33eb97e6b` was an earlier structurally verified and locally reproducible package subject. Its hashes and PASS states are historical only; later DSM-account, lifecycle-bootstrap, and cross-host-reproducibility fixes supersede it for installation.
 
-- Local `go test ./...`: PASS.
-- Local `go vet ./...`: PASS.
-- GitHub Actions CI run #2: PASS.
-- SPK Packager lint: PASS.
-- strict SPK verify: PASS.
-- deterministic double-SPK build: PASS.
-- ARMv7 binary SHA-256: `3e2d82ee0fadfbf3d6873cc7ea7fc1e2a072573491dcb0ea54075a1ae2ade058`.
-- SPK SHA-256: `7a9fcea97bafc940eb1593eca957499863c16cca07d1fe9500385e8f7d097ebe`.
-- SPK arch: `armada38x`.
-- payload ELF `e_machine=40`.
+Historical evidence for that subject included:
 
-DSM install/runtime/application states remain intentionally open until the exact qualified artifact is exercised on the NAS.
+- `go test ./...`: PASS;
+- `go vet ./...`: PASS;
+- SPK Packager lint and strict verify: PASS;
+- deterministic double-SPK build: PASS;
+- ARMv7 payload with ELF `e_machine=40`.
 
-See `docs/CONTINUATION_20261004_V1.md` for the durable continuation state and next execution frontier.
+Do not reuse an older SPK hash, CI result, or provenance record for a newer commit.
+
+## Current-head rule
+
+A candidate may advance SOURCE/SPK states only when the evidence names the exact current Git commit and artifact. Windows/Linux reproducibility requires complete SPK byte identity, not merely an identical Go payload. Generated provenance therefore uses explicit UTF-8/LF bytes.
+
+DSM installation is not attempted until the exact current artifact has passed source tests, strict package verification, reproducibility checks, and lifecycle review. DSM runtime/application states remain open until read back from the NAS.
+
+See `docs/CONTINUATION_20261004_V1.md` for durable continuation context.
