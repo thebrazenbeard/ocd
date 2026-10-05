@@ -103,7 +103,7 @@ ocd version
 
 OCD contains the packaging logic and pinned library source needed for its own build. It does not clone `spk-packager` or fetch Go module source during the build.
 
-Required local toolchains: Go 1.23+ and Python 3.11+.
+Required local toolchains: Go 1.23.12 for byte-reproducible SPK builds and Python 3.11+. Source tests also run against newer supported Go versions in CI.
 
 Linux/macOS/CI:
 
@@ -113,12 +113,12 @@ go vet -mod=vendor ./...
 bash scripts/build-spk.sh
 ```
 
-Windows PowerShell:
+Windows Command Prompt:
 
 ```text
 go test -mod=vendor ./...
 go vet -mod=vendor ./...
-.\scripts\build-spk.ps1
+.\scripts\build-spk.cmd
 ```
 
 The SPK build refuses a dirty working tree because an artifact claiming an exact source revision must actually correspond to that revision. `ocd version` and `/api/v1/status` expose the bound source revision.

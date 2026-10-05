@@ -8,7 +8,13 @@ MANIFEST="$ROOT/package-source/spk-packager.toml"
 SOURCE_URL="https://github.com/thebrazenbeard/ocd"
 VERSION="$("$PYTHON" -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["package"]["version"])' "$MANIFEST")"
 REVISION="$(git -C "$ROOT" rev-parse HEAD)"
+GO_VERSION="$("$GO" version | awk '{print $3}')"
+EXPECTED_GO_VERSION="go1.23.12"
 
+if [[ "$GO_VERSION" != "$EXPECTED_GO_VERSION" ]]; then
+  echo "SPK builds require $EXPECTED_GO_VERSION; got $GO_VERSION" >&2
+  exit 2
+fi
 if [[ ! "$REVISION" =~ ^[0-9a-f]{40}$ ]]; then
   echo "invalid Git revision: $REVISION" >&2
   exit 2
@@ -23,7 +29,7 @@ PAYLOAD_DIR="$ROOT/package-source/payload/bin"
 PROVENANCE="$ROOT/package-source/payload/SOURCE_PROVENANCE.json"
 mkdir -p "$PAYLOAD_DIR" "$(dirname "$OUTPUT")"
 
-"$PYTHON" -c 'import json,pathlib,sys; p=pathlib.Path(sys.argv[1]); p.write_text(json.dumps({"build_contract":"repo-contained","external_metadata_inputs":["TVmaze","TMDB","embedded-media-tags"],"logic_authority":"repository","product":"OCD","schema":"OCD_SOURCE_PROVENANCE_V1","source_repository":sys.argv[4],"source_revision":sys.argv[3],"source_revision_url":sys.argv[4]+"/commit/"+sys.argv[3],"version":sys.argv[2]},sort_keys=True,indent=2)+"\n",encoding="utf-8")' "$PROVENANCE" "$VERSION" "$REVISION" "$SOURCE_URL"
+"$PYTHON" -c 'import json,pathlib,sys; p=pathlib.Path(sys.argv[1]); p.write_text(json.dumps({"build_contract":"repo-contained","builder_go_version":sys.argv[5],"external_metadata_inputs":["TVmaze","TMDB","embedded-media-tags"],"logic_authority":"repository","product":"OCD","schema":"OCD_SOURCE_PROVENANCE_V1","source_repository":sys.argv[4],"source_revision":sys.argv[3],"source_revision_url":sys.argv[4]+"/commit/"+sys.argv[3],"version":sys.argv[2]},sort_keys=True,indent=2)+"\n",encoding="utf-8")' "$PROVENANCE" "$VERSION" "$REVISION" "$SOURCE_URL" "$GO_VERSION"
 
 CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 \
   "$GO" build -mod=vendor -trimpath -buildvcs=false \

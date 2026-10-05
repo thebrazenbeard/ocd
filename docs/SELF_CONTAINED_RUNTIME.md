@@ -33,13 +33,16 @@ The repository contains:
 - repository-local Linux and Windows build entrypoints.
 
 A build environment still needs the Go and Python toolchains, Git, and ordinary operating
-system utilities. Those are toolchains, not semantic/runtime dependencies.
+system utilities. Those are toolchains, not semantic/runtime dependencies. SPK builds pin
+Go 1.23.12 so the compiled payload is reproducible across qualified build environments;
+source-compatibility tests may run under newer Go versions.
 
 ## Source binding
 
 Every provenance-bearing SPK build must come from a clean tracked Git working tree.
 The build embeds the exact 40-hex commit in the OCD binary, `/api/v1/status`, and
-`SOURCE_PROVENANCE.json` inside the SPK.
+`SOURCE_PROVENANCE.json` inside the SPK. The provenance payload also records the pinned Go
+compiler version used to produce the binary.
 
 The source repository is `https://github.com/thebrazenbeard/ocd`, and the runtime exposes
 a direct commit URL. A build from uncommitted tracked source fails closed rather than
