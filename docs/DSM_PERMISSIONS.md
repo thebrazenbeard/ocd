@@ -1,12 +1,12 @@
 # DSM shared-folder permissions
 
-OCD runs as the DSM internal package user `OCD`, not root.
+OCD runs as the DSM 7 internal package service account `sc-OCD` (package ID `OCD`), not root.
 
 Selecting or entering a path inside OCD does not magically grant filesystem rights.
 
 ## Initial root
 
-The installation wizard asks for one DSM shared-folder name and media type. The SPK's `conf/resource` uses DSM's `data-share` worker to grant the OCD internal user read/write access. DSM exposes the acquired share to the package under `/var/packages/OCD/shares/<share>`; the installer resolves and stores the real path.
+The installation wizard asks for one DSM shared-folder name and media type. The SPK's `conf/resource` uses DSM's `data-share` worker to grant `sc-OCD` read/write access. DSM exposes the acquired share to the package under `/var/packages/OCD/shares/<share>`; the installer resolves and stores the real path.
 
 ## Additional roots
 
@@ -16,7 +16,7 @@ For additional existing shared folders:
 2. Edit the target share.
 3. Permissions.
 4. Change the account selector to **System internal user**.
-5. Find **OCD**.
+5. Find **sc-OCD** (DSM may display it as the OCD system-internal package account).
 6. Grant **Read/Write** if the root will use apply mode, or at minimum read/traverse for observe-only use.
 7. Add the root through OCD.
 

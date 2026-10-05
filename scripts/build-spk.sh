@@ -36,6 +36,7 @@ CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 \
   -ldflags="-s -w -buildid= -X github.com/thebrazenbeard/ocd/internal/buildinfo.Version=$VERSION -X github.com/thebrazenbeard/ocd/internal/buildinfo.Revision=$REVISION -X github.com/thebrazenbeard/ocd/internal/buildinfo.SourceURL=$SOURCE_URL" \
   -o "$PAYLOAD_DIR/ocd" "$ROOT/cmd/ocd"
 
+"$PYTHON" "$ROOT/tools/package_contract_test.py"
 PYTHONPATH="$ROOT/tools/spk_packager" "$PYTHON" -m spk_packager.cli lint "$MANIFEST"
 PYTHONPATH="$ROOT/tools/spk_packager" "$PYTHON" -m spk_packager.cli build "$MANIFEST" --output "$OUTPUT"
 PYTHONPATH="$ROOT/tools/spk_packager" "$PYTHON" -m spk_packager.cli verify "$OUTPUT"

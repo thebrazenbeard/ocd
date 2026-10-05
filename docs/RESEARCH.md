@@ -53,7 +53,7 @@ OCD deliberately does **not** import their broader download-client/indexer/libra
 
 ## DSM package permissions
 
-DSM 7 packages are expected to run as non-root internal package users. Shared-folder access is a separate ACL/resource concern.
+DSM 7 packages are expected to run as non-root internal package users. SynoCommunity's current DSM 7 packaging convention names the effective account `sc-<package>`; for OCD that is `sc-OCD`. Shared-folder access is a separate ACL/resource concern.
 
 Synology's `data-share` resource worker can grant read/write permission to an internal package user and, since DSM 7.0-41201, creates a symlink under:
 
@@ -65,5 +65,7 @@ OCD uses this for the initial install-wizard root instead of attempting privileg
 
 References:
 - Synology Developer Guide: Resource / Data Share
-- `SynoCommunity/spksrc` DSM 7 permission and resource documentation
+- `SynoCommunity/spksrc` DSM 7 permission, service-account, deterministic packaging, and resource conventions
+- `SynoCommunity/spkrepo` and `jdel/sspks` for Package Center repository/feed behavior (distribution layer only)
+- `john-shine/synology-baiduNetdisk-package` as a legacy hand-built SPK comparison; its DSM 7 limitations are not adopted
 - `thebrazenbeard/spk-packager` qualified DSM packaging framework

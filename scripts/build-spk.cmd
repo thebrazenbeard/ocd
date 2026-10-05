@@ -47,6 +47,9 @@ set "LDFLAGS=-s -w -buildid= -X github.com/thebrazenbeard/ocd/internal/buildinfo
 "%GO%" build -mod=vendor -trimpath -buildvcs=false -ldflags="%LDFLAGS%" -o "%PAYLOAD%\ocd" "%ROOT%\cmd\ocd"
 if errorlevel 1 exit /b %errorlevel%
 
+"%PYTHON%" "%ROOT%\tools\package_contract_test.py"
+if errorlevel 1 exit /b %errorlevel%
+
 set "PYTHONPATH=%ROOT%\tools\spk_packager"
 "%PYTHON%" -m spk_packager.cli lint "%MANIFEST%"
 if errorlevel 1 exit /b %errorlevel%

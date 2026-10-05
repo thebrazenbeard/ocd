@@ -25,7 +25,7 @@ stop_timeout_seconds = 12
 
 [privilege]
 run_as = "package"
-username = "OCD"
+username = "sc-OCD"
 
 [assets]
 icon64 = "assets/PACKAGE_ICON.PNG"

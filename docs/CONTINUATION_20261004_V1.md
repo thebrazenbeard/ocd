@@ -76,7 +76,7 @@ Track/disc numbers stay in embedded music metadata and are not added to music fi
 
 ## DSM/SPK architecture already implemented
 
-Package ID/user: `OCD`.
+Package ID: `OCD`. DSM 7 service account: `sc-OCD`.
 
 Target baseline: DSM 7.2.2+, DS216 / `armada38x` first live target.
 
@@ -88,13 +88,13 @@ Install wizard asks for:
 3. mutation mode: observe / apply;
 4. optional TMDB bearer token.
 
-The SPK uses DSM's `data-share` resource worker to grant the internal OCD package user read/write access to the initial share. `postinst` resolves `/var/packages/OCD/shares/<share>` and stores that root. Additional roots require the OCD internal user to have DSM shared-folder ACL access.
+The SPK uses DSM's `data-share` resource worker to grant the DSM internal service account `sc-OCD` read/write access to the initial share. `postinst` resolves `/var/packages/OCD/shares/<share>` and stores that root. Additional roots require `sc-OCD` to have DSM shared-folder ACL access.
 
 SPK manifest version is currently `0.1.0-0001`.
 
-## Current qualification evidence
+## Historical qualification evidence
 
-Exact implementation subject: `21b2919134daa4ea45f57df8e25561c33eb97e6b`.
+The earlier exact implementation subject `21b2919134daa4ea45f57df8e25561c33eb97e6b` was structurally/reproducibly qualified before the DSM 7 `sc-OCD` package-account correction. It is historical evidence only and must not be selected for live installation. Always qualify and use the current branch head.
 
 Local:
 - `go test ./...`: PASS.
@@ -112,13 +112,12 @@ Qualified artifacts:
 - SPK architecture: `armada38x`
 - payload ELF `e_machine`: `40`
 
-The attempted duplicate local rebuild late in the originating chat was interrupted by command-runner timeouts/replays and is not additional qualification evidence. The already-recorded exact-head qualification above remains the valid package evidence.
+The hashes above belong only to that historical subject. They must not be reused as evidence for a newer commit.
 
 ## Qualification state
 
-- SOURCE_VALIDATED: PASS
-- SPK_STRUCTURALLY_VERIFIED: PASS
-- SPK_REPRODUCIBLE: PASS
+For the current branch head, source/build/package qualification must be established by exact-head CI and/or local readback before installation. Live DSM states remain:
+
 - DSM_INSTALLED: PENDING
 - DSM_RUNTIME_VERIFIED: PENDING
 - APPLICATION_BEHAVIOR_VERIFIED: PENDING
