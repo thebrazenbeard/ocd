@@ -97,3 +97,8 @@ See `docs/ARCHITECTURE.md`, `docs/RESEARCH.md`, and `docs/DSM_PERMISSIONS.md`.
 `SOURCE_VALIDATED != SPK_STRUCTURALLY_VERIFIED != SPK_REPRODUCIBLE != DSM_INSTALLED != DSM_RUNTIME_VERIFIED != APPLICATION_BEHAVIOR_VERIFIED`
 
 A green build is not a live-NAS claim.
+
+
+## Workspace startup safety (source scope)
+
+The concealed VS Code `folderOpen` task ran Node against `public/fonts/fa-solid-500.woff2`, a tracked 27 KB JavaScript executable disguised as a font. The task and pseudo-font were removed and automatic workspace tasks set to valid string `"off"`; static tests and read-only CI now check that specific path. Historical Git revisions retain provenance; do not execute the removed file. Source containment cannot establish whether any older checkout, host, editor extension, or user-level settings were clean.
