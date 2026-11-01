@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -30,6 +31,7 @@ class ContentAddressedStoreTests(unittest.TestCase):
         self.ref = cloud.BlobRef(hashlib.sha256(PAYLOAD).hexdigest(), len(PAYLOAD))
         self.store = cloud.LocalContentStore(self.root)
 
+    @unittest.skipUnless(os.name == "posix", "anchored cache publication requires POSIX primitives")
     def test_verified_content_addressed_import_and_explicit_materialization(self):
         cached = self.store.import_file(self.source, self.ref)
         self.assertEqual(cached, self.root / self.ref.key)
@@ -59,6 +61,7 @@ class ContentAddressedStoreTests(unittest.TestCase):
             with self.assertRaises(cloud.CloudStoreError):
                 cloud.BlobRef("0" * 64, size)
 
+    @unittest.skipUnless(os.name == "posix", "anchored cache publication requires POSIX primitives")
     def test_existing_destination_is_not_overwritten(self):
         self.store.import_file(self.source, self.ref)
         existing = self.destination / "models/one.gguf"
@@ -68,6 +71,7 @@ class ContentAddressedStoreTests(unittest.TestCase):
             self.store.materialize(self.ref, self.destination, "models/one.gguf")
         self.assertEqual(existing.read_bytes(), b"precious existing data")
 
+    @unittest.skipUnless(os.name == "posix", "anchored cache publication requires POSIX primitives")
     def test_existing_content_addressed_blob_must_still_match_digest(self):
         cache_path = self.store.import_file(self.source, self.ref)
         cache_path.write_bytes(b"modified by another application")
@@ -77,6 +81,7 @@ class ContentAddressedStoreTests(unittest.TestCase):
             self.store.materialize(self.ref, self.destination, "not-published.gguf")
         self.assertFalse((self.destination / "not-published.gguf").exists())
 
+    @unittest.skipUnless(os.name == "posix", "anchored cache publication requires POSIX primitives")
     def test_reimport_refuses_changed_source_even_when_correct_blob_is_cached(self):
         cache_path = self.store.import_file(self.source, self.ref)
         self.source.write_bytes(b"altered source")
@@ -84,6 +89,7 @@ class ContentAddressedStoreTests(unittest.TestCase):
             self.store.import_file(self.source, self.ref)
         self.assertEqual(cache_path.read_bytes(), PAYLOAD)
 
+    @unittest.skipUnless(os.name == "posix", "anchored cache publication requires POSIX primitives")
     def test_refuses_unsafe_destination_and_symlink_escape(self):
         self.store.import_file(self.source, self.ref)
         for relpath in ("../secret", "/root/secret", "nested/../secret", "CON.txt", "C:unsafe", "x\\y"):
@@ -100,6 +106,7 @@ class ContentAddressedStoreTests(unittest.TestCase):
             self.store.materialize(self.ref, self.destination, "shortcut/escaped.gguf")
         self.assertEqual(list(outside.iterdir()), [])
 
+    @unittest.skipUnless(os.name == "posix", "anchored cache publication requires POSIX primitives")
     def test_refuses_symlink_source_and_symlink_existing_blob(self):
         symlink = self.base / "model-link.gguf"
         try:
@@ -117,6 +124,7 @@ class ContentAddressedStoreTests(unittest.TestCase):
         with self.assertRaises(cloud.CloudStoreError):
             self.store.import_file(self.source, self.ref)
 
+    @unittest.skipUnless(os.name == "posix", "anchored cache publication requires POSIX primitives")
     def test_publication_collision_is_no_replace(self):
         self.store.import_file(self.source, self.ref)
         real_publish = artifacts._publish_noreplace
@@ -130,6 +138,7 @@ class ContentAddressedStoreTests(unittest.TestCase):
                 self.store.materialize(self.ref, self.destination, "late.gguf")
         self.assertEqual((self.destination / "late.gguf").read_bytes(), b"racing writer")
 
+    @unittest.skipUnless(os.name == "posix", "anchored cache publication requires POSIX primitives")
     def test_source_and_destination_roots_must_be_explicit_and_absolute(self):
         with self.assertRaises(cloud.CloudStoreError):
             cloud.LocalContentStore("somewhere/relative")

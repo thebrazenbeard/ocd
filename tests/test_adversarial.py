@@ -22,6 +22,7 @@ from ocd.types import MovePlan, RootConfig
 
 
 class ScannerAdversarialTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform.startswith("linux"), "dirfd swap fixture is Linux-specific")
     def test_directory_swapped_to_outside_symlink_before_scandir_is_not_enumerated(self) -> None:
         """A check/open race must not return files from outside the root."""
         with tempfile.TemporaryDirectory() as workspace:
@@ -81,6 +82,7 @@ class ScannerAdversarialTests(unittest.TestCase):
 
 
 class ApplyAdversarialTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform.startswith("linux"), "organizer apply is Linux-only")
     def test_destination_parent_symlink_swap_at_commit_must_not_redirect_move(self) -> None:
         """A replaced destination directory cannot redirect a move outside root."""
         with tempfile.TemporaryDirectory() as workspace:

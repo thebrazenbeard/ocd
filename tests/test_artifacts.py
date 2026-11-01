@@ -104,6 +104,7 @@ class ArtifactFetchTests(unittest.TestCase):
     def assert_no_staging_files(self):
         self.assertEqual(list(self.root.rglob(".ocd-download-*.part")), [])
 
+    @unittest.skipIf(os.name == "nt", "POSIX publication fixture; Windows native fixture tests are separate and gated")
     def test_download_is_verified_and_published_only_once(self):
         entry = self.entry()
         path = artifacts.fetch_verified(entry, self.root)
@@ -117,6 +118,7 @@ class ArtifactFetchTests(unittest.TestCase):
         self.assertEqual(path.read_bytes(), PAYLOAD)
         self.assertEqual(len(self.observed), 1)  # Refused before a new GET.
 
+    @unittest.skipIf(os.name == "nt", "POSIX publication fixture; Windows native fixture tests are separate and gated")
     def test_empty_file_and_loopback_redirect(self):
         zero = self.entry("empty.dat", url="/empty", payload=b"")
         self.assertEqual(artifacts.fetch_verified(zero, self.root).read_bytes(), b"")
@@ -124,6 +126,7 @@ class ArtifactFetchTests(unittest.TestCase):
         self.assertEqual(artifacts.fetch_verified(redirected, self.root).read_bytes(), PAYLOAD)
         self.assert_no_staging_files()
 
+    @unittest.skipIf(os.name == "nt", "POSIX publication fixture; Windows native fixture tests are separate and gated")
     def test_short_oversized_corrupt_and_missing_response_never_publish(self):
         cases = [
             self.entry("short.bin", url="/short"),
@@ -138,6 +141,7 @@ class ArtifactFetchTests(unittest.TestCase):
                 self.assertFalse((self.root / entry.destination_relpath).exists())
                 self.assert_no_staging_files()
 
+    @unittest.skipIf(os.name == "nt", "POSIX publication fixture; Windows native fixture tests are separate and gated")
     def test_existing_file_and_dangling_symlink_are_not_overwritten(self):
         target = self.root / "bundle/archive.tar"
         target.parent.mkdir()
@@ -156,6 +160,7 @@ class ArtifactFetchTests(unittest.TestCase):
         self.assertTrue(link.is_symlink())
         self.assertEqual(self.observed, [])
 
+    @unittest.skipIf(os.name == "nt", "POSIX publication fixture; Windows native fixture tests are separate and gated")
     def test_symlink_directory_and_root_ancestors_are_refused(self):
         outside = self.base / "outside"
         outside.mkdir()
@@ -174,6 +179,7 @@ class ArtifactFetchTests(unittest.TestCase):
         self.assertEqual(list(outside.iterdir()), [])
         self.assertEqual(self.observed, [])
 
+    @unittest.skipIf(os.name == "nt", "POSIX publication fixture uses Linux _publish_noreplace")
     def test_destination_collision_at_publication_does_not_overwrite(self):
         entry = self.entry("race.bin")
         real_publish = artifacts._publish_noreplace
@@ -253,6 +259,7 @@ class ArtifactFetchTests(unittest.TestCase):
         with self.assertRaisesRegex(artifacts.ArtifactError, "duplicate JSON key"):
             artifacts.load_manifest(path)
 
+    @unittest.skipIf(os.name == "nt", "POSIX publication fixture; Windows native fixture tests are separate and gated")
     def test_github_token_is_environment_only_and_not_sent_to_other_hosts(self):
         token_name = "OCD_TEST_RELEASE_ASSET_TOKEN"
         with mock.patch.dict(os.environ, {token_name: "secret-value"}):
@@ -286,6 +293,7 @@ class ArtifactFetchTests(unittest.TestCase):
             self.assertEqual((self.root / "private.bin").read_bytes(), PAYLOAD)
             self.assert_no_staging_files()
 
+    @unittest.skipIf(os.name == "nt", "POSIX publication fixture; Windows native fixture tests are separate and gated")
     def test_real_loopback_http_server_when_network_is_available(self):
         try:
             server = ThreadingHTTPServer(("127.0.0.1", 0), ArtifactHTTPHandler)

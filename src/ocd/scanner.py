@@ -14,6 +14,7 @@ from pathlib import Path
 import stat
 import time
 
+from .config import _unlinked_directory_chain
 from .types import FileEntry, RootConfig
 
 
@@ -56,7 +57,22 @@ def _check_directory(path: Path, source: Path) -> bool:
         resolved = path.resolve(strict=True)
     except (FileNotFoundError, RuntimeError):
         return False
-    if resolved != path or not resolved.is_relative_to(source):
+    if os.name == "nt":
+        # Windows' canonical resolver expands harmless 8.3 DOS short names,
+        # so a literal path equality check rejects ordinary user temp roots.
+        # Keep a lexical containment check and explicitly reject *every*
+        # reparse-point ancestor before checking the filesystem identity.
+        try:
+            valid = (
+                path.is_relative_to(source)
+                and _unlinked_directory_chain(path)
+                and os.path.samefile(path, resolved)
+            )
+        except OSError:
+            valid = False
+        if not valid:
+            raise ValueError(f"Unsafe traversal outside registered source: {path}")
+    elif resolved != path or not resolved.is_relative_to(source):
         raise ValueError(f"Unsafe traversal outside registered source: {path}")
     return True
 
@@ -224,14 +240,29 @@ def scan_root(root: RootConfig) -> tuple[FileEntry, ...]:
         resolved_source = source.resolve(strict=True)
     except (FileNotFoundError, RuntimeError) as exc:
         raise ValueError(f"Source root is missing or unsafe: {source}") from exc
-    if (
-        _is_link(source_details)
-        or not stat.S_ISDIR(source_details.st_mode)
-        or source != resolved_source
-    ):
+    unsafe_root = _is_link(source_details) or not stat.S_ISDIR(source_details.st_mode)
+    if os.name == "nt":
+        try:
+            unsafe_root = (
+                unsafe_root
+                or not _unlinked_directory_chain(source)
+                or not os.path.samefile(source, resolved_source)
+            )
+        except OSError:
+            unsafe_root = True
+    else:
+        unsafe_root = unsafe_root or source != resolved_source
+    if unsafe_root:
         raise ValueError(f"Source root must be a real, unlinked directory: {source}")
 
-    destination = Path(root.destination).resolve(strict=False)
+    # Keep the lexical spelling on Windows: resolve() can expand 8.3 names,
+    # breaking exclusion comparisons against entries under the source spelling.
+    # The registered destination is independently checked for reparse points.
+    destination = (
+        Path(root.destination).absolute()
+        if os.name == "nt"
+        else Path(root.destination).resolve(strict=False)
+    )
     if destination == source:
         return ()
 

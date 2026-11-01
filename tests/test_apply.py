@@ -82,6 +82,7 @@ class ApplyMoveTests(unittest.TestCase):
         self.assertFalse(plan.destination.parent.exists())
         self.assertFalse(self.journal.exists())
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "organizer apply is enabled only on Linux")
     def test_success_is_no_overwrite_and_journalled(self):
         plan = self.plan()
         result = engine.apply_moves(self.root(), [plan], self.journal)
@@ -127,6 +128,7 @@ class ApplyMoveTests(unittest.TestCase):
         self.assertTrue(plan.source.exists())
         self.assertFalse((outside / "example.mkv").exists())
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "organizer apply is enabled only on Linux")
     def test_collision_created_at_commit_does_not_overwrite(self):
         plan = self.plan()
         actual_rename = engine._rename_noreplace
@@ -165,6 +167,7 @@ class ApplyMoveTests(unittest.TestCase):
         self.assertFalse((outside / plan.source.name).exists())
         self.assertFalse((displaced / plan.source.name).exists())
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "organizer apply is enabled only on Linux")
     def test_second_failure_rolls_first_back_without_deletion(self):
         one = self.plan("one.mkv")
         two = self.plan("two.mkv")
@@ -191,6 +194,7 @@ class ApplyMoveTests(unittest.TestCase):
             ["begin", "intent", "complete", "intent", "abort_intent", "rollback_intent", "rollback_complete", "end"],
         )
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "organizer apply is enabled only on Linux")
     def test_rollback_collision_holds_both_user_files(self):
         first = self.plan("first.mkv", content=b"original first")
         second = self.plan("second.mkv")
@@ -214,6 +218,7 @@ class ApplyMoveTests(unittest.TestCase):
         self.assertEqual(first.source.read_bytes(), b"new occupant of original path")
         self.assertTrue(second.source.exists())
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "organizer apply is enabled only on Linux")
     def test_completed_journal_can_be_reused_for_another_batch(self):
         first = self.plan("first.mkv")
         second = self.plan("second.mkv")
@@ -223,6 +228,7 @@ class ApplyMoveTests(unittest.TestCase):
         self.assertFalse(next_result.recovery_required or next_result.holds)
         self.assertTrue(first.destination.exists() and second.destination.exists())
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "organizer apply is enabled only on Linux")
     def test_incomplete_journal_blocks_retries_and_preserves_source(self):
         plan = self.plan()
         self.journal.write_text(json.dumps({"event": "begin", "transaction": "interrupted"}) + "\n")
@@ -235,6 +241,7 @@ class ApplyMoveTests(unittest.TestCase):
         self.assertFalse(plan.destination.exists())
         self.assertEqual(self.journal.read_bytes(), before)
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "organizer apply is enabled only on Linux")
     def test_corrupt_journal_is_never_ignored(self):
         plan = self.plan()
         self.journal.write_bytes(b'{"event": "begin"')

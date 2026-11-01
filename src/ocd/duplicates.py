@@ -22,7 +22,10 @@ from pathlib import Path
 import stat
 from typing import Iterable, Iterator
 
-from .scanner import _CAN_SCAN_FD, _check_directory, _is_link, _open_beneath_root, _same_file
+from .scanner import (
+    _CAN_SCAN_FD, _check_directory, _is_link, _open_beneath_root,
+    _same_file, _unlinked_directory_chain,
+)
 from .types import RootConfig
 
 
@@ -79,9 +82,21 @@ def _admit_source(root: RootConfig) -> tuple[Path, os.stat_result, Path]:
         resolved = source.resolve(strict=True)
     except (FileNotFoundError, RuntimeError) as exc:
         raise ValueError(f"Source root is missing or unsafe: {source}") from exc
-    if _is_link(details) or not stat.S_ISDIR(details.st_mode) or source != resolved:
+    unsafe = _is_link(details) or not stat.S_ISDIR(details.st_mode)
+    if os.name == "nt":
+        try:
+            unsafe = unsafe or not _unlinked_directory_chain(source) or not os.path.samefile(source, resolved)
+        except OSError:
+            unsafe = True
+    else:
+        unsafe = unsafe or source != resolved
+    if unsafe:
         raise ValueError(f"Source root must be a real, unlinked directory: {source}")
-    destination = Path(root.destination).resolve(strict=False)
+    destination = (
+        Path(root.destination).absolute()
+        if os.name == "nt"
+        else Path(root.destination).resolve(strict=False)
+    )
     return source, details, destination
 
 

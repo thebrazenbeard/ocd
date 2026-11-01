@@ -344,6 +344,29 @@ class CliTests(unittest.TestCase):
         fetch.assert_called_once()
         self.assertFalse(self.config.exists())
 
+    @unittest.skipUnless(os.name == "nt", "Windows artifact publication default-deny CLI contract")
+    def test_windows_artifact_fetch_fails_closed_before_publication_without_optin(self):
+        from ocd.artifacts import ArtifactEntry
+
+        destination = self.base / "staging"
+        destination.mkdir()
+        entry = ArtifactEntry("https://example.org/model.gguf", "0" * 64, 100, "model.gguf")
+        manifest = self.base / "artifacts.json"
+        manifest.write_text(json.dumps({"artifacts": [vars(entry)]}), encoding="utf-8")
+        with patch.dict(os.environ, {"OCD_EXPERIMENTAL_WINDOWS_ARTIFACT_PUBLISH": "0"}), patch(
+            "ocd.artifacts._fetch_verified_windows", side_effect=AssertionError("Windows publication attempted")
+        ) as publisher:
+            status, _, error = self.invoke(
+                "artifact", "fetch", "--manifest", str(manifest),
+                "--destination-root", str(destination), "--artifact", "model.gguf",
+            )
+        self.assertEqual(status, 1)
+        self.assertIn("disabled", error)
+        publisher.assert_not_called()
+        self.assertEqual(list(destination.iterdir()), [])
+        self.assertFalse(self.config.exists())
+
+    @unittest.skipIf(os.name == "nt", "Windows organizer apply intentionally fails closed pending native qualification")
     def test_authorized_apply_moves_without_deleting_content(self):
         self.initialize()
         self.register(mode="apply")
@@ -367,6 +390,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("Applied 0 move(s)", output)
         self.assertEqual(target.read_bytes(), b"preserve these bytes\x00")
 
+    @unittest.skipIf(os.name == "nt", "Windows organizer apply intentionally fails closed pending native qualification")
     def test_relative_config_path_supports_apply_journal(self):
         self.initialize()
         self.register(mode="apply")

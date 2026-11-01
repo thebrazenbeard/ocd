@@ -12,6 +12,7 @@ import math
 import os
 from pathlib import Path
 import re
+import stat
 import sys
 import tempfile
 
@@ -246,6 +247,34 @@ def add_root(config: Config, source: Path, destination: Path, *, mode: str = "ob
     return updated
 
 
+def _on_windows() -> bool:
+    return os.name == "nt"
+
+
+def _unlinked_directory_chain(path: Path) -> bool:
+    """Reject Windows reparse ancestors while tolerating genuine 8.3 aliases.
+
+    Windows ``Path.resolve`` expands short DOS names (e.g. RUNNER~1) into
+    long names. Comparing their spellings would reject ordinary directories,
+    even though neither name is a reparse-point redirection. Inspect every
+    component with lstat instead; a junction/symlink in *any* ancestor is an
+    authorization failure, irrespective of where resolve leads.
+    """
+    reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    for part in (*reversed(path.parents), path):
+        try:
+            details = part.lstat()
+        except OSError:
+            return False
+        if (
+            not stat.S_ISDIR(details.st_mode)
+            or stat.S_ISLNK(details.st_mode)
+            or bool(getattr(details, "st_file_attributes", 0) & reparse)
+        ):
+            return False
+    return True
+
+
 def verified_root(root: RootConfig) -> RootConfig:
     """Detect removed or redirected roots before scan, plan, or apply."""
     for name, path in (("source", root.source), ("destination", root.destination)):
@@ -253,6 +282,17 @@ def verified_root(root: RootConfig) -> RootConfig:
             resolved = path.resolve(strict=True)
         except (OSError, RuntimeError) as exc:
             raise ConfigError(f"registered {name} unavailable: {path}: {exc}") from exc
-        if resolved != path or not path.is_dir():
+        # 8.3 DOS aliases expand when resolved on Windows; their spelling is
+        # not a stable indication of a symlink. Enforce no-reparse on the
+        # entire ancestor chain instead, then verify same filesystem object.
+        if _on_windows():
+            valid = _unlinked_directory_chain(path)
+            try:
+                valid = valid and os.path.samefile(path, resolved)
+            except OSError:
+                valid = False
+        else:
+            valid = resolved == path and path.is_dir()
+        if not valid:
             raise ConfigError(f"registered {name} has changed or is not a directory: {path}")
     return root
