@@ -33,11 +33,13 @@ from .types import RootConfig
 # st_ino, and st_nlink, even for ordinary NTFS files. A separate Path.lstat()
 # is necessary before file identity, stability, and hardlink checks can work.
 _WINDOWS_NEEDS_PATH_LSTAT = os.name == "nt"
-# NTFS can finalize an inode's change/creation timestamp a few milliseconds
-# after a just-written file is closed. An enumerated candidate may therefore
-# have an older st_ctime_ns than the *same* file opened for hashing. Validate
-# its identity, size and mtime against enumeration, then use the opened handle
-# as the strict ctime baseline for every check while/after reading.
+# Windows st_ctime_ns is deprecated as a creation-time source in CPython 3.12+
+# and may reflect metadata changes instead. NTFS can finalize it milliseconds
+# after a just-written file is closed, even during the read-only hash window.
+# It is therefore NOT a reliable Windows stability invariant. The scan still
+# requires the same device, inode, size, mtime, link count, regular-file type,
+# pathname identity, and exact SHA-256 bytes before/after streaming. Linux
+# retains its strict ctime checks against concurrent metadata changes.
 _WINDOWS_CTIME_CAN_SETTLE = os.name == "nt"
 
 
@@ -240,8 +242,10 @@ def _enumerate_root(
 
 
 def _matching(
-    details: os.stat_result, original: os.stat_result, *, check_ctime: bool = True,
+    details: os.stat_result, original: os.stat_result, *, check_ctime: bool | None = None,
 ) -> bool:
+    if check_ctime is None:
+        check_ctime = not _WINDOWS_CTIME_CAN_SETTLE
     return (
         stat.S_ISREG(details.st_mode)
         and not _is_link(details)

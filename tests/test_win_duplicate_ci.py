@@ -62,6 +62,8 @@ class WindowsIdentityTests(unittest.TestCase):
             self.assertTrue(duplicate_module._matching(actual, stale, check_ctime=False))
 
             real_from_stat = duplicate_module._from_stat
+            real_fstat = os.fstat
+            fstat_count = 0
 
             def enumerated_before_settle(path, root, root_stat, file_stat):
                 candidate = real_from_stat(path, root, root_stat, file_stat)
@@ -69,16 +71,29 @@ class WindowsIdentityTests(unittest.TestCase):
                     return replace(candidate, details=_EarlierCtime(candidate.details))
                 return candidate
 
+            def ctime_settles_while_hashing(fd):
+                nonlocal fstat_count
+                fstat_count += 1
+                details = real_fstat(fd)
+                # The first file's opened snapshot has an older ctime.  Its
+                # post-hash snapshot advances by 2 ms despite unchanged bytes,
+                # identity, size, mtime and link count.
+                return _EarlierCtime(details) if fstat_count == 1 else details
+
             with (
                 patch.object(duplicate_module, "_CAN_SCAN_FD", False),
                 patch.object(duplicate_module, "_WINDOWS_NEEDS_PATH_LSTAT", True),
                 patch.object(duplicate_module, "_WINDOWS_CTIME_CAN_SETTLE", True),
                 patch.object(duplicate_module, "_from_stat", side_effect=enumerated_before_settle),
+                patch.object(duplicate_module.os, "fstat", side_effect=ctime_settles_while_hashing),
             ):
+                self.assertTrue(duplicate_module._matching(actual, stale))
+                self.assertFalse(duplicate_module._matching(actual, stale, check_ctime=True))
                 report = duplicate_module.scan_duplicates([
                     RootConfig(source, Path(base) / "organized")
                 ])
 
+            self.assertGreaterEqual(fstat_count, 2)
             self.assertEqual(report.files_hashed, 2)
             self.assertEqual(report.skipped_unstable, ())
             self.assertEqual(len(report.groups), 1)
