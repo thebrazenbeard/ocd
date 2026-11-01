@@ -1,5 +1,7 @@
 # DSM shared-folder permissions
 
+> **Historical / unsupported:** This page describes a discontinued Synology DSM/SPK proposal. Current OCD is a Windows/Linux Python developer preview; it does not install a DSM internal package user, grant DSM shared-folder permissions, or have an SPK installer. Do not follow this page to configure the active application. See [Architecture](ARCHITECTURE.md), [Qualification](QUALIFICATION.md), and [Product vision](PRODUCT_VISION.md).
+
 OCD runs as the DSM internal package user `OCD`, not root.
 
 Selecting or entering a path inside OCD does not magically grant filesystem rights.

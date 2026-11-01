@@ -1,104 +1,166 @@
-# OCD — Organized & Clean DiskStation
+# OCD — Organized & Clean Disk
 
-OCD is a low-overhead Synology DSM daemon that watches explicitly registered media roots and keeps new or changed media organized without turning the NAS into a full Sonarr/Radarr stack.
+**Vision: put tagged folders on autopilot across Windows, Linux, local drives, and cloud storage.**
 
-**OCD never guesses a library type.** Every watched root is explicitly registered as television, movies, or music because the parsing, metadata, and naming contracts are different.
+OCD is being rebuilt as an installable storage organizer. You choose which folders it may monitor, tag what belongs where, and define local or cloud destinations. OCD's intended job is to watch for changes, propose safe organization, and—once authorized and fully qualified—keep those spaces organized without requiring you to manually sort every new file.
 
-## Naming contracts
+The goal is straightforward: files should have a home, storage should be understandable, and a developer workstation shouldn't need to permanently retain every model, archive, training checkpoint, or duplicate.
 
-Television:
+**Development status:** The repository currently contains a *developer preview* of the local organizer, not the finished always-on application described above. The preview can monitor registered folders by polling and **report** proposed moves; it does **not** automatically move them. Explicit local moves are implemented for Linux test fixtures; Windows moves remain disabled pending native safety qualification. Cloud storage accounts, remote organization, automatic scheduling, and native installers are not implemented. Optional observe-only startup templates exist, but they are not a managed organizing service. See [what works now](#what-works-today) and the [product milestones](docs/PRODUCT_VISION.md).
 
-```
-Show/
-└── Season 01/
-    └── S01E01 - Episode Name.ext
-```
+## The experience we're building
 
-Movies:
+1. **Register a space.** Pick a folder, drive-backed collection, or supported cloud location. OCD only touches what you deliberately authorize.
+2. **Tag it.** Define where documents, photos, project assets, models, or other file groups belong. Rules can route within local storage or to a remote destination.
+3. **Let OCD watch.** An installed Windows or Linux service detects changes, waits for writes to settle, and reconciles files against your rules.
+4. **Review risk, automate the routine.** Preview new rules and potentially destructive work; approve known-safe moves, reconcile conflicts, retain a recovery trail, and surface ambiguous files for human review.
+5. **See what's consuming space.** Detect exact duplicates, redundant intermediates, and large artifacts, with provenance and recoverability checks before any proposed deletion.
 
-```
-Title (Year)/
-└── Title (Year).ext
-```
+For machine-learning workflows, the target architecture keeps **code, manifests, checksums, and retrieval instructions in Git**, large weights in an artifact/model store, and lets compute workers fetch only verified model files needed by a job. A developer workstation should not be the permanent model archive. This is the **intended workflow, not an existing OCD cloud-sync feature**.
 
-Music:
+### What works today
 
-```
-Artist/
-└── Album/
-    └── Song Title.ext
-```
+| Capability | Developer-preview status |
+| --- | --- |
+| Register explicit local source/destination folders, folder tags, and extension tags | Implemented CLI; Linux fixture tests |
+| Inspect files and preview tagged moves | `scan` and `plan` are read-only |
+| Continuously observe changes | `watch` polls in the foreground and **reports only** |
+| Find exact-content duplicate candidates | `duplicates` reads sizes and SHA-256; no deletion |
+| Move tagged local files | Explicit `apply --yes` on **Linux only**, journaled and no-overwrite; not production-qualified |
+| Fetch a known remote artifact | Explicit manifest-based, size + SHA-256 verified download; Linux source-tested; experimental Windows publication **disabled by default** pending native qualification; not sync |
+| Cache known model/artifact bytes for a job | `cache import` / `cache materialize` content-addressed local staging on POSIX; no deletion, upload, or Windows qualification |
+| Windows organizing | Read-only source path exists; **apply is disabled** pending native verification |
+| Optional observe-only launch on login | Opt-in Linux user-service template and Windows per-user scheduled-task helper; no automatic moves; native host qualification pending |
+| Installed automatic organizer, cloud-account upload/sync, GUI, native installers | **Not implemented** |
 
-Track number and disc number stay in embedded music metadata; OCD does not put them in the filename.
+The preview supports two explicit rule types: **folder tag → destination category**, or **filename extension → destination category**. For example, `folder:Invoices=Accounting` routes files anywhere under the registered source's `Invoices/` folder to `Accounting/`, regardless of extension; `.jpg=Photos` routes remaining JPEGs to `Photos/`. More-specific tagged ancestor folders take precedence over broader folder tags, and folder tags take precedence over extension tags. The `folder:` syntax uses portable slash-separated *relative* directories, such as `folder:Projects/Receipts`. These are explicit rules, **not** semantic content classification or cloud account discovery.
 
-## Metadata contracts
+## Try the local developer preview
 
-- **Television:** TVmaze public API. No API key required.
-- **Movies:** TMDB. The user supplies a TMDB API Read Access Token.
-- **Music:** embedded Artist / Album / Title tags are authoritative in v0.1. Track/disc/year remain metadata and are not rewritten.
+Requires Python 3.10+ on Windows or Linux. This is a source install, **not** a native installer or resident service.
 
-## Safety model
+From the checked-out repository:
 
-OCD defaults to **observe** mode. It plans and records changes but does not rename until a root is explicitly placed in **apply** mode.
-
-Apply mode is fail-closed:
-
-- package-user read/write access is checked before root admission;
-- files must be stable before processing;
-- ambiguous or missing metadata is held for review;
-- existing targets are never overwritten;
-- targets may not escape the registered root;
-- OCD uses same-filesystem rename only, never copy/delete fallback;
-- video sidecars with matching stems are moved as one operation set;
-- partial apply attempts are rolled back where possible;
-- every apply has an intent/completion JSONL journal;
-- OCD-originated watcher events are temporarily suppressed to prevent loops.
-
-## DSM package behavior
-
-The DSM 7.2.2+ SPK runs as the internal `OCD` package user. During first installation, the wizard asks for:
-
-1. an initial DSM shared-folder name;
-2. its media type: television, movies, or music;
-3. observe or apply mode.
-
-The SPK declares that share through DSM's `data-share` resource worker and grants the internal OCD package user read/write access. DSM 7 creates a package share symlink under `/var/packages/OCD/shares/`; the installer resolves that to the real shared-folder path before storing the root.
-
-Additional roots may be added later through the local API/CLI, but the OCD package user must separately be granted DSM shared-folder ACL access to those shares.
-
-The administration/API server is loopback-only by default at `127.0.0.1:9157`. This is deliberate: v0.1 does not expose unauthenticated mutation endpoints to the LAN.
-
-## CLI
-
-```text
-ocd serve
-ocd root add --path /volume1/TV\ Shows --type tv --mode observe
-ocd root list
-ocd root remove --id <id>
-ocd tmdb --bearer <TMDB_API_READ_ACCESS_TOKEN>
+```sh
+# Linux
+python3 -m pip install -e .
+ocd --help
 ```
 
-## Build
-
-OCD's DSM package is built with the qualified `thebrazenbeard/spk-packager` toolchain.
-
-```text
-go test ./...
-GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build ...
-spk-packager lint package-source/spk-packager.toml
-spk-packager build ...
-spk-packager verify ...
+```powershell
+# Windows PowerShell
+py -m pip install -e .
+ocd --help
 ```
 
-See `docs/ARCHITECTURE.md`, `docs/RESEARCH.md`, and `docs/DSM_PERMISSIONS.md`.
+If an editable install is inconvenient, run directly with `PYTHONPATH=src python3 -m ocd` on Linux, or set `$env:PYTHONPATH="src"` and run `py -m ocd` on Windows. Packaging may need to download build tools; the preview has no third-party **runtime** dependencies.
 
-## Qualification states
+### 1. Register and observe a folder
 
-`SOURCE_VALIDATED != SPK_STRUCTURALLY_VERIFIED != SPK_REPRODUCIBLE != DSM_INSTALLED != DSM_RUNTIME_VERIFIED != APPLICATION_BEHAVIOR_VERIFIED`
+This Linux example creates empty example source/destination folders, starts in the default **observe** mode, and does not move your files:
 
-A green build is not a live-NAS claim.
+```sh
+mkdir -p "$HOME/OCD-Inbox" "$HOME/OCD-Sorted"
+ocd --config ./ocd.json init
+ocd --config ./ocd.json roots add "$HOME/OCD-Inbox" "$HOME/OCD-Sorted" \
+  --tag .pdf=Documents --tag .jpg=Photos \
+  --tag folder:Invoices=Accounting
+ocd --config ./ocd.json roots list
+ocd --config ./ocd.json scan
+ocd --config ./ocd.json plan
+ocd --config ./ocd.json watch --interval 2
+```
 
+`watch` stays in the foreground and prints fresh plans when observations change. Stop it with Ctrl+C. **It never applies those plans**, even if a root was registered in `apply` mode.
 
-## Workspace startup safety (source scope)
+On Windows PowerShell, read-only registration and planning use the same commands with Windows paths:
 
-The concealed VS Code `folderOpen` task ran Node against `public/fonts/fa-solid-500.woff2`, a tracked 27 KB JavaScript executable disguised as a font. The task and pseudo-font were removed and automatic workspace tasks set to valid string `"off"`; static tests and read-only CI now check that specific path. Historical Git revisions retain provenance; do not execute the removed file. Source containment cannot establish whether any older checkout, host, editor extension, or user-level settings were clean.
+```powershell
+$source = Join-Path $env:USERPROFILE "OCD-Inbox"
+$dest = Join-Path $env:USERPROFILE "OCD-Sorted"
+New-Item -ItemType Directory -Force $source, $dest | Out-Null
+ocd --config .\ocd.json init
+ocd --config .\ocd.json roots add $source $dest --tag .pdf=Documents --tag 'folder:Invoices=Accounting'
+ocd --config .\ocd.json plan
+ocd --config .\ocd.json watch --interval 2
+```
+
+Native Windows behavior is not yet host-qualified. Do not use the Windows example as evidence that automatic organization is ready.
+
+### 2. Find candidate duplicates without deleting anything
+
+```sh
+ocd --config ./ocd.json duplicates --max-files 10000 --max-entries 20000
+```
+
+This compares exact-content SHA-256 hashes, skips hardlink aliases, and displays *estimated* reclaimable bytes. It does not delete or deduplicate files. Estimates may differ from actual disk space recovered because of compression, hardlinks, snapshots, and filesystem behavior.
+
+### 3. Optionally authorize a local move (Linux only)
+
+Use a **separate disposable test folder** first. An apply-enabled registration plus an explicit `--yes` is required:
+
+```sh
+mkdir -p "$HOME/OCD-Test-In" "$HOME/OCD-Test-Out"
+ocd --config ./ocd.json roots add "$HOME/OCD-Test-In" "$HOME/OCD-Test-Out" \
+  --mode apply --tag .txt=Notes
+ocd --config ./ocd.json plan --root "$HOME/OCD-Test-In"
+ocd --config ./ocd.json apply --root "$HOME/OCD-Test-In" --yes
+```
+
+The applier rechecks current files, refuses overwrites, and journals intent/completion. It is not a production backup or a guarantee against power loss. **Windows apply refuses to run** until its native rename and recovery path passes qualification.
+
+### 4. Explicitly fetch one verified artifact (Windows/Linux source implementation)
+
+Given an existing JSON manifest:
+
+```json
+{
+  "artifacts": [
+    {
+      "url": "https://example.org/models/example.gguf",
+      "sha256": "REPLACE_WITH_ACTUAL_64_CHARACTER_SHA256_HEX",
+      "size": 1234567,
+      "destination_relpath": "models/example.gguf"
+    }
+  ]
+}
+```
+
+Replace the example URL, digest, and byte count with real values before using it. Then explicitly choose one manifest entry:
+
+```sh
+mkdir -p "$HOME/OCD-Artifacts"
+ocd artifact fetch --manifest ./artifacts.json \
+  --destination-root "$HOME/OCD-Artifacts" \
+  --artifact models/example.gguf
+```
+
+The fetcher verifies exact size and SHA-256 before no-overwrite publication. Linux uses POSIX anchored publication. An experimental native Windows publication path exists but **fails closed by default**. For disposable-fixture qualification only, an operator must deliberately set `OCD_EXPERIMENTAL_WINDOWS_ARTIFACT_PUBLISH=1` for the process; it has **not passed live NTFS/ReFS qualification** and must not be used for valuable files. The [manual native Windows qualification workflow](.github/workflows/ocd-native-windows-qualification.yml) keeps unfinished rename/publication tests separate from normal cross-platform source CI; these tests are not proof of a supported Windows mutation path. This **downloads** a named remote file; it cannot create cloud backups, upload weights, or synchronize locations.
+
+### 5. Cache a verified artifact for on-demand use (POSIX source implementation)
+
+Given an existing cache directory, a source artifact and its known SHA-256 and byte count, these explicit commands store and materialize a content-addressed copy:
+
+```sh
+ocd cache import --store-root /absolute/cache --source /absolute/model.gguf \
+  --sha256 ACTUAL_SHA256 --size ACTUAL_BYTE_COUNT
+ocd cache materialize --store-root /absolute/cache \
+  --sha256 ACTUAL_SHA256 --size ACTUAL_BYTE_COUNT \
+  --destination-root /absolute/job --destination models/model.gguf
+```
+
+Replace all placeholder values, and create the destination directories first. The cache checks exact hashes and sizes, refuses overwrites, and never deletes a source or cached file. It is a local verified cache building block, **not a cloud provider, a remote uploader, or an automatic disk cleanup command**. Secure local publication remains host-qualification dependent; Windows cache mutation currently fails closed.
+
+## Principles and boundaries
+
+- **Opt-in scope:** folders and transfer destinations must be registered deliberately. The preview makes no global disk-wide changes.
+- **Observe before action:** an observation or rule does not itself authorize a move or delete. Future automation needs explicit approvals, recoverability, and policy controls.
+- **Data integrity first:** stable-file checks, no-overwrite moves, hashes for artifacts, conflict holds, and operation journals are foundational requirements.
+- **Space estimates are not deletion orders:** model checkpoints, adapter weights, receipts, and apparently duplicate directories may contain different training outputs.
+- **Windows + Linux:** both are target platforms. macOS is **not** targeted.
+
+Optional [observe-only startup templates](packaging/README.md) can launch the polling watcher for a single user on Windows or Linux. They require explicit installation and do not perform file moves, deletes, or cloud synchronization.
+
+For the component boundaries and security design, read [Architecture](docs/ARCHITECTURE.md); for what has actually been tested, read [Qualification](docs/QUALIFICATION.md); for the unfinished installed/cloud product, read [Product vision and delivery milestones](docs/PRODUCT_VISION.md).
+
+The repository previously contained a disguised executable invoked by a VS Code startup task; the task and payload were removed in a security fix. Do not run copies from old revisions. See [Qualification](docs/QUALIFICATION.md#repository-startup-security-note) for the scope of that finding.

@@ -1,114 +1,91 @@
-# OCD architecture v0.1
+# OCD architecture — Organized & Clean Disk
 
-## Root contract
+## Scope and current boundary
 
-A watched root is durable configuration:
+OCD targets explicitly registered local folders on **Windows and Linux**. Local and cloud storage are part of the product direction, but the source implementation currently plans local files by explicitly registered folder or filename-extension tags—not inferred document or media content. It has on-demand scan/plan commands, an observe-only polling monitor, read-only duplicate analysis, and opt-in verified artifact download and local content-addressed cache modules. Optional startup templates can schedule the *observe-only* watcher. OCD does **not** use filesystem event notifications, synchronize remote objects, authenticate to cloud storage accounts, upload files, or operate as an automatic organizing service. macOS is not a target.
 
+The executable path is intentionally small:
+
+1. Read locally stored configuration of registered source/destination roots.
+2. Scan eligible local files without changing them.
+3. Build a deterministic move plan or a review/hold result.
+4. Only on a separate `apply` command, validate and execute approved moves.
+
+The CLI invokes these phases on demand. Observation-only polling may repeat the scan/plan phases but never invokes apply. No HTTP API, schedule, queue, filesystem-event loop, database, or daemon is required for this flow; the Python library APIs are callable independently.
+
+## Registration contract
+
+Each configured root has these fields:
+
+| Field | Meaning |
+|---|---|
+| `source` | Explicit, existing local directory from which eligible files may be considered |
+| `destination` | Explicit, existing local directory to receive organized files |
+| `mode` | `observe` (default) or `apply` |
+| `tags` | Explicit folder ancestry or extension-to-category mappings, such as `folder:Invoices=Accounting` and `.jpg=Photos` |
+| `settle_seconds` | Minimum age for a candidate file to be considered stable |
+
+Configuration is per-user JSON with a `version` and list of roots. User-selected paths, not broad disk discovery, define the allowed scope. Source and destination must be distinct, nonoverlapping directories, and moving between different filesystems is refused. Explicit `folder:relative/path=Category` tags match descendants by longest folder ancestry, then extension tags (such as `.pdf=Documents`) are used as fallback. Tags are not evidence that OCD recognizes file contents, extracts semantic metadata, or chooses a cloud account. Files without a matching folder or extension tag are held. Category labels are normalized as safe directory components.
+
+## Local pipeline
+
+### Scan (read-only)
+
+The scanner enumerates regular files within a registered local source, sorted deterministically by absolute path. It does not intentionally follow symbolic links, junctions, or Windows reparse points, and it prunes an output destination nested inside the source as a defense in depth (although the planner refuses overlapping roots). Candidates younger than the configured settle interval are held back. Scan failures are surfaced rather than silently treated as a successful empty result; the scanner does not read file contents.
+
+### Plan (read-only)
+
+The planner routes files with an explicit matching folder or extension tag to `<destination>/<category>/<basename>`, using portable-safe component normalization. Original subdirectory hierarchy is not reproduced. A plan records the observed source path, size, and modification time so that apply can reject candidates which changed after the scan. Invalid paths, unmatched tags, path escape, case-insensitive name conflicts, multiple sources mapping to one target, or other uncertain states produce hold/review outcomes. Planning is not an implicit filesystem write or permission grant.
+
+### Apply (mutating, explicitly gated)
+
+An invocation must identify a registered root configured as `apply` **and** carry `--yes`. The CLI replans from current filesystem state; the applier validates the batch and rechecks source identity/size/time, path components, same-filesystem placement, and destination vacancy before each move. Existing targets are not replaced. **Linux apply** uses the `renameat2(RENAME_NOREPLACE)` no-replacement primitive, with secure directory access and an error if the primitive is unavailable. **Windows apply is currently disabled/fail-closed**; `win32.rename_noreplace` is a source-level helper under qualification, not an enabled commit path. It is limited to fixed local drive-letter paths and rejects reparse points and unsupported path forms. No deletion or automatic copy/delete fallback is part of the organizer contract.
+
+The applier writes a local JSONL intent/completion journal beside the configuration file before and after its moves, then attempts reverse-order rollback if a batch fails. Incomplete or ambiguous journal state blocks further automatic application and calls for manual recovery. Rollback is best-effort, not an atomic multi-file transaction.
+
+These are safety contracts, not a statement that transactional durability, power-loss recovery, network-filesystem behavior, or every Windows/Linux filesystem has been qualified. Consult [Qualification](QUALIFICATION.md) for the distinction between source implementation and tested behavior.
+
+### Observe-only polling (`monitor.watch_roots`)
+
+This source API repeatedly validates explicitly supplied roots, scans them, and rebuilds their full plans at a caller-specified interval. The first observation and later changes emit `change` events containing current files, proposed moves, and holds. Per-root scan/plan failures emit coalesced `error` events; other roots continue to be observed. A caller-owned stop event or bounded poll count ends the loop. No files are moved, including when a root is configured `apply`; this is polling in the invoking process, **not** an installed watcher, event-driven monitor, scheduler, or daemon.
+
+### Exact-content duplicate candidates (`duplicates.scan_duplicates`)
+
+This source API examines regular files beneath only the explicitly supplied source roots, independent of extension tags and settle time. It skips symlinks/reparse points, de-duplicates names referring to the same inode, and hashes same-sized candidates with streaming SHA-256. Changed/disappeared candidates are skipped; scan/root/file/entry limits bound work and over-limit calls fail rather than return a misleading partial result. Groups are **read-only findings**: neither deletion nor hard-link replacement is offered. Reported logical duplicate bytes and potential reclaim bytes are estimates, not proof of physically recoverable space; hard links, sparse files, compression, reflinks, and concurrent changes complicate that measurement.
+
+### Verified local artifact staging (`artifacts.load_manifest`, `artifacts.fetch_verified`)
+
+This is a separate, explicit **download-to-local-disk** operation, available from `ocd artifact fetch` or the Python API, not part of organizer routing or a cloud-sync adapter. It does not load registered organizer roots or need an organizer config. Manifest entries state `url`, expected SHA-256, exact byte `size`, and a safe relative `destination_relpath`; the command selects exactly one entry by that relative path. The downloader requires HTTPS for remote servers (loopback HTTP is allowed for local testing), bounds redirects, does not send a GitHub Release token to redirect destinations, streams and checks content before local publication, and refuses to replace an existing file. Linux uses an anchored POSIX hard-link publication path; native Windows fixed-drive NTFS/ReFS handle-based no-overwrite publication exists at source level but is **disabled by default** pending host qualification. `OCD_EXPERIMENTAL_WINDOWS_ARTIFACT_PUBLISH=1` opts in for controlled disposable-fixture tests only. It makes no remote changes, uploads, or synchronization promises.
+
+### Content-addressed artifact cache (`cloud.LocalContentStore`)
+
+An explicit local cache stores bytes under a deterministic SHA-256 key after validating their supplied hash and exact byte count. `ocd cache import` imports one existing file without deleting it; `ocd cache materialize` verifies one cached object and publishes a separate copy into a user-selected, existing job directory without overwriting a target. These commands are independent from organizer root registration. The `HTTPSManifestProvider` API provides **read-only, manifest-selected download retrieval** through the verified fetcher; it is not an account-authorized remote object listing, upload, cloud relocation, or automatic synchronization. Native safe cache publication remains POSIX-only/fail-closed elsewhere until separately qualified.
+
+## Command boundary
+
+```text
+ocd [--config PATH] init
+ocd [--config PATH] roots add SOURCE DESTINATION [--mode observe|apply] [--tag TAG=LABEL ...] [--settle-seconds NUMBER]
+ocd [--config PATH] roots list
+ocd [--config PATH] scan [--root SOURCE]
+ocd [--config PATH] plan [--root SOURCE]
+ocd [--config PATH] watch [--root SOURCE] [--interval SECONDS]
+ocd [--config PATH] duplicates [--root SOURCE] [--max-files NUMBER] [--max-entries NUMBER]
+ocd [--config PATH] apply --root SOURCE --yes
+ocd artifact fetch --manifest JSON --destination-root EXISTING_ABSOLUTE_DIR --artifact DESTINATION_RELPATH
+ocd cache import --store-root EXISTING_ABSOLUTE_DIR --source ABSOLUTE_FILE --sha256 HEX --size BYTES
+ocd cache materialize --store-root EXISTING_ABSOLUTE_DIR --sha256 HEX --size BYTES --destination-root EXISTING_ABSOLUTE_DIR --destination RELPATH
 ```
-absolute path
-+ media type
-+ metadata provider
-+ mutation mode
-```
 
-Media type is mandatory: `tv`, `movie`, or `music`.
+The operations `scan`, `plan`, `watch` and `duplicates` are read-only with respect to managed files. The foreground `watch` command polls until interrupted; the `duplicates` command prints exact-content candidates and conservative space estimates, without remediation. `apply` is the only user-facing operation allowed to **move organizer files**, and that commit path is currently Linux-only. Adding a root changes configuration, not the files inside that root. The default mode is `observe`. `artifact fetch` and `cache` are separately opted-in file-creation operations; they never move organizer sources, delete their own inputs, or upload/synchronize remote content.
 
-OCD intentionally refuses mixed-type roots and overlapping/nested registered roots.
+## Storage and external-system boundaries
 
-## Format contract
+- **Local:** Ordinary filesystem paths on targeted Windows/Linux hosts. Permissions are those of the invoking OS user; OCD is not a privileged volume manager. Host qualification is incomplete. Windows organizer `apply` remains disabled; experimental explicit artifact downloads have a disabled-by-default native Windows path.
+- **Cloud (future):** Full provider adapters and credentials need separate explicit authorization, object identity/version checks, conflict policy, and move semantics. The existing HTTPS manifest reader and local content-addressed cache are retrieval/staging building blocks; they do not implement cloud-provider accounts, authenticated object browsing, upload, remote moves, or sync.
+- **Monitoring:** Observe-only polling exists; an unattended event watcher would additionally need event handling, reconciliation, loop prevention, restart recovery, and deployment/service management. There is no always-on monitoring guarantee or automatic reorganization.
+- **DSM/media (historical):** Prior design notes describe Synology packages, TVmaze/TMDB and typed media renaming. Those are not current Python CLI features, and there is no supported DSM install/API path here.
 
-### Television
+## Non-goals and reliability limits
 
-Target:
-
-```
-<root>/<Show>/Season <NN>/S<NN>E<NN> - <Episode Name>.<ext>
-```
-
-Input must expose an `SxxExx` episode token in v0.1. TVmaze resolves the canonical show and episode names. Specials use Season 00 when source numbering says season 0.
-
-### Movies
-
-Target:
-
-```
-<root>/<Title> (<Year>)/<Title> (<Year>).<ext>
-```
-
-TMDB resolves the canonical title and release year. A TMDB API Read Access Token is required. If credentials or a confident unique match are absent, OCD holds the file.
-
-### Music
-
-Target:
-
-```
-<root>/<Artist>/<Album>/<Song Title>.<ext>
-```
-
-Embedded Artist, Album, and Title tags are the source of truth in v0.1. Track number, disc number, and year stay inside the audio metadata and are not added to filenames. OCD does not rewrite media tags in v0.1.
-
-## Runtime pipeline
-
-1. **Root admission**
-   - absolute/canonical path;
-   - explicit media type;
-   - provider/type compatibility;
-   - readable/listable as the OCD package user;
-   - apply roots must pass a create/remove probe.
-
-2. **Watch**
-   - recursive fsnotify/inotify directory watches;
-   - newly created directories are added;
-   - noisy file events are debounced;
-   - periodic reconciliation covers missed events and restarts.
-
-3. **Stability**
-   - regular supported media file;
-   - mtime older than settle interval;
-   - watcher path gets an additional size/mtime comparison before processing.
-
-4. **Parse and resolve**
-   - type-specific parser;
-   - type-specific provider;
-   - no cross-type guessing.
-
-5. **Plan**
-   - deterministic target path;
-   - target must remain in the same registered root;
-   - collision means HOLD;
-   - matching video sidecars are included.
-
-6. **Apply**
-   - observe roots only record the plan;
-   - apply roots append journal intent first;
-   - same-filesystem `rename(2)` semantics only;
-   - no overwrite and no copy/delete fallback;
-   - partial operation batches attempt reverse-order rollback.
-
-7. **Suppress**
-   - source and target paths changed by OCD are suppressed briefly from watcher reprocessing.
-
-## State
-
-Package state is small and reconstructible:
-
-- `config.json` — typed roots, settle/reconcile settings, TMDB credential;
-- `journal.jsonl` — mutation intents/completions;
-- in-memory recent plans/findings — operational UI state.
-
-No database is required for v0.1.
-
-## HTTP boundary
-
-The API binds only to loopback:
-
-- `GET /healthz`
-- `GET /api/v1/status`
-- `GET|POST /api/v1/roots`
-- `DELETE /api/v1/roots/{id}`
-- `GET /api/v1/plans`
-- `GET /api/v1/findings`
-- `PUT /api/v1/settings/tmdb`
-- `POST /api/v1/reconcile`
-
-Loopback binding is a security boundary for v0.1, not an inconvenience to route around silently. A future DSM-authenticated portal can replace it.
+OCD does not promise automatic content classification, metadata enrichment, remote cloud sync, duplicate cleanup, backup, guaranteed atomic multi-file transactions, or recovery of files modified by third-party processes. Exact-content duplicate *reports* do not authorize deletion. Artifact downloads are opt-in local staging, not backup or synchronization. Users should inspect plans and test on copies before moving valuable files.

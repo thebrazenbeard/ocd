@@ -1,0 +1,37 @@
+name: OCD Experimental Windows Native Qualification
+
+# Deliberately NOT run on ordinary push/PR: these tests invoke unfinished,
+# fail-closed native Windows mutation primitives on ephemeral disposable files.
+# They are expected to expose qualification failures until those APIs are fixed
+# and separately adversarially reviewed. This workflow does not install a
+# daemon, open cloud accounts, move real user data, or authorize Windows apply.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-disposable-fixtures:
+    name: Native disposable fixtures on Windows Python ${{ matrix.python }}
+    runs-on: windows-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.12', '3.13']
+    env:
+      OCD_NATIVE_WINDOWS_QUALIFICATION: '1'
+      OCD_EXPERIMENTAL_WINDOWS_ARTIFACT_PUBLISH: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install organizer source
+        run: python -m pip install -e .
+      - name: Exercise native fixture tests (experimental and potentially failing)
+        run: >-
+          python -m unittest -v
+          tests.test_win32_apply.NativeWin32RenameFixtureTests
+          tests.test_artifacts_win32.NativeWindowsArtifactTests

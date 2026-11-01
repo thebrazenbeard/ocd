@@ -2,6 +2,8 @@
 
 Research date: 2026-10-04.
 
+> **Historical DSM/Go proposal, not the current OCD product.** This document records the original Synology and media-organizer design decisions as of the research date. Statements below about what “OCD uses” refer to that abandoned proposal; they do **not** describe implemented capabilities of the Windows/Linux Python source. For the active architecture and roadmap, see [Architecture](ARCHITECTURE.md) and [Product vision](PRODUCT_VISION.md). macOS and DSM packaging are not current target platforms.
+
 ## Filesystem watching
 
 OCD uses `fsnotify`, which maps to Linux inotify. Important constraints admitted into the architecture:
