@@ -48,7 +48,7 @@ class _EarlierCtime:
 
 
 class WindowsIdentityTests(unittest.TestCase):
-    def test_windows_ctime_settles_before_hash_but_hash_window_stays_strict(self):
+    def test_windows_ctime_settles_during_hash_without_other_identity_change(self):
         with tempfile.TemporaryDirectory() as base:
             source = Path(base) / "source"
             source.mkdir()
@@ -58,7 +58,7 @@ class WindowsIdentityTests(unittest.TestCase):
             second.write_bytes(b"same bytes")
             actual = first.lstat()
             stale = _EarlierCtime(actual)
-            self.assertFalse(duplicate_module._matching(actual, stale))
+            self.assertFalse(duplicate_module._matching(actual, stale, check_ctime=True))
             self.assertTrue(duplicate_module._matching(actual, stale, check_ctime=False))
 
             real_from_stat = duplicate_module._from_stat
