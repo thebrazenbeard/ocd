@@ -50,7 +50,7 @@ class DuplicateScannerTests(unittest.TestCase):
         result = scan_duplicates([self.root()], chunk_size=3)
 
         self.assertEqual(result.files_scanned, 4)
-        self.assertEqual(result.files_hashed, 3)
+        self.assertEqual(result.files_hashed, 3, f"duplicate scan details: {result!r}")
         self.assertEqual(result.skipped_hardlinks, 0)
         self.assertEqual(result.skipped_unstable, ())
         self.assertEqual(len(result.groups), 1)
