@@ -265,7 +265,11 @@ def _rename_buffer(directory_handle: object, leaf: str) -> tuple[ctypes.Array, i
     offset = _FILE_RENAME_INFO.FileName.offset
     # Include the harmless terminating UTF-16 NUL, although the API does not
     # require it or include it in FileNameLength.
-    count = max(ctypes.sizeof(_FILE_RENAME_INFO), offset + len(name) + 2)
+    # NTIFS FILE_RENAME_INFORMATION requires at least sizeof(struct) PLUS
+    # FileNameLength bytes.  The trailing WCHAR[1] is included in sizeof;
+    # allocating only offset + name bytes can yield ERROR_INVALID_PARAMETER
+    # (87) on Windows even though every visible field has been initialized.
+    count = ctypes.sizeof(_FILE_RENAME_INFO) + len(name)
     buffer = ctypes.create_string_buffer(count)
     header = ctypes.cast(buffer, ctypes.POINTER(_FILE_RENAME_INFO)).contents
     header.ReplaceIfExists = 0

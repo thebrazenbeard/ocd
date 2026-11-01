@@ -277,7 +277,8 @@ class Win32RenameTests(unittest.TestCase):
         self.assertEqual(header.RootDirectory, 0xABC)
         self.assertEqual(header.ReplaceIfExists, 0)
         self.assertEqual(header.FileNameLength, len(encoded))
-        self.assertEqual(n, max(ctypes.sizeof(win32._FILE_RENAME_INFO), 20 + len(encoded) + 2))
+        self.assertEqual(n, ctypes.sizeof(win32._FILE_RENAME_INFO) + len(encoded))
+        self.assertGreaterEqual(n, ctypes.sizeof(win32._FILE_RENAME_INFO) + header.FileNameLength)
         self.assertEqual(ctypes.string_at(ctypes.addressof(data) + win32._FILE_RENAME_INFO.FileName.offset, len(encoded)), encoded)
 
     def test_ctypes_adapter_uses_no_follow_no_share_delete_and_delete_access(self):
