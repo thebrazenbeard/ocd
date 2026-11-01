@@ -1,0 +1,17 @@
+[Unit]
+Description=OCD tagged-folder monitor (observe only; never applies moves)
+Documentation=https://github.com/thebrazenbeard/ocd
+
+[Service]
+Type=simple
+# Replace both uppercase placeholders with ABSOLUTE paths before installing.
+# Use the interpreter in which you installed OCD (often a virtual environment).
+ExecStart=REPLACE_WITH_ABSOLUTE_PYTHON -m ocd --config REPLACE_WITH_ABSOLUTE_CONFIG watch --interval 2
+Restart=on-failure
+RestartSec=30s
+NoNewPrivileges=true
+PrivateTmp=true
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,30 @@
+name: OCD Windows and Linux
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  qualify-source:
+    name: Python ${{ matrix.python }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ['3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install organizer
+        run: python -m pip install -e .
+      - name: Verify source and safety contracts
+        run: python -m unittest discover -s tests -v
+      - name: Verify CLI entry point
+        run: python -m ocd --help

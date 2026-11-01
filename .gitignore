@@ -6,4 +6,12 @@ ocd-state/
 branch_structure.json
 temp_auto_push.bat
 temp_interactive_push.bat
-.gitignore
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+build/
+.coverage
+.ocd/
+*.journal.jsonl
