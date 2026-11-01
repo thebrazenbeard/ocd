@@ -255,14 +255,16 @@ def scan_root(root: RootConfig) -> tuple[FileEntry, ...]:
     if unsafe_root:
         raise ValueError(f"Source root must be a real, unlinked directory: {source}")
 
-    # Keep the lexical spelling on Windows: resolve() can expand 8.3 names,
-    # breaking exclusion comparisons against entries under the source spelling.
-    # The registered destination is independently checked for reparse points.
-    destination = (
-        Path(root.destination).absolute()
-        if os.name == "nt"
-        else Path(root.destination).resolve(strict=False)
-    )
+    destination = Path(root.destination).resolve(strict=False)
+    if os.name == "nt":
+        # A source might use an 8.3 alias while its destination spells the
+        # same ancestor with a long DOS name. Resolve *both* before checking
+        # containment, then map the relative suffix back to source's spelling
+        # for comparisons against directory entries from this scan.
+        if destination == resolved_source or destination.is_relative_to(resolved_source):
+            destination = source.joinpath(*destination.relative_to(resolved_source).parts)
+        else:
+            destination = Path(root.destination).absolute()
     if destination == source:
         return ()
 

@@ -34,6 +34,7 @@ class UnsafeWindowsMove(OSError):
 _FILE_ATTRIBUTE_DIRECTORY = 0x10
 _FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 _FILE_READ_ATTRIBUTES = 0x80
+_FILE_TRAVERSE = 0x20
 _DELETE = 0x10000
 _FILE_SHARE_READ = 1
 _FILE_SHARE_WRITE = 2
@@ -70,7 +71,10 @@ class FileInfo:
 
 class _Api(Protocol):
     def require_local_drive(self, drive: str) -> None: ...
-    def open(self, path: str, *, source: bool = False, missing_ok: bool = False) -> object | None: ...
+    def open(
+        self, path: str, *, source: bool = False, missing_ok: bool = False,
+        directory: bool = False,
+    ) -> object | None: ...
     def info(self, handle: object) -> FileInfo: ...
     def rename(self, source: object, destination_parent: object, leaf: str) -> None: ...
     def close(self, handle: object) -> None: ...
@@ -135,7 +139,10 @@ def _hold_directories(
     last_handle: object | None = None
     last_info: FileInfo | None = None
     for path in paths:
-        handle = api.open(path)
+        # FILE_RENAME_INFO.RootDirectory resolves a relative target name via
+        # this open directory handle. Request FILE_TRAVERSE explicitly for
+        # that operation, not just FILE_READ_ATTRIBUTES.
+        handle = api.open(path, directory=True)
         if handle is None:
             raise UnsafeWindowsMove(f"required directory disappeared: {path}")
         stack.callback(api.close, handle)
@@ -335,14 +342,17 @@ class _Win32Api:
         if fs.value.upper() not in {"NTFS", "REFS"}:
             raise UnsafeWindowsMove("unsupported Windows filesystem")
 
-    def open(self, path: str, *, source: bool = False, missing_ok: bool = False) -> int | None:
+    def open(
+        self, path: str, *, source: bool = False, missing_ok: bool = False,
+        directory: bool = False,
+    ) -> int | None:
         # Use extended syntax to prevent Win32 from silently normalizing a
         # spelling after _path_parts() checked it.  Reparse processing is
         # suppressed for the final component of every individually opened path.
         flags = _FILE_FLAG_BACKUP_SEMANTICS | _FILE_FLAG_OPEN_REPARSE_POINT
         handle = self._create(
             "\\\\?\\" + path,
-            _FILE_READ_ATTRIBUTES | (_DELETE if source else 0),
+            _FILE_READ_ATTRIBUTES | (_FILE_TRAVERSE if directory else 0) | (_DELETE if source else 0),
             _FILE_SHARE_READ | _FILE_SHARE_WRITE, None, _OPEN_EXISTING, flags, None,
         )
         if handle in (None, ctypes.c_void_p(-1).value):
@@ -378,7 +388,10 @@ class _Win32Api:
     def rename(self, source: object, destination_parent: object, leaf: str) -> None:
         buffer, length = _rename_buffer(destination_parent, leaf)
         if not self._set(source, _FILE_RENAME_INFO_CLASS, buffer, length):
-            raise self._win_error()
+            # Preserve the exact failing Win32 operation for native CI. A
+            # generic WinError 87 otherwise gives no clue whether the rename
+            # buffer or an unrelated handle operation was rejected.
+            raise UnsafeWindowsMove(f"FileRenameInfo no-replace rename failed: {self._win_error()}")
 
     def close(self, handle: object) -> None:
         if not self._close(handle):

@@ -29,6 +29,12 @@ from .scanner import (
 from .types import RootConfig
 
 
+# CPython documents that DirEntry.stat() on Windows returns zero for st_dev,
+# st_ino, and st_nlink, even for ordinary NTFS files. A separate Path.lstat()
+# is necessary before file identity, stability, and hardlink checks can work.
+_WINDOWS_NEEDS_PATH_LSTAT = os.name == "nt"
+
+
 @dataclass(frozen=True)
 class DuplicateFile:
     path: Path
@@ -73,6 +79,26 @@ def _check_limit(value: int, name: str, *, ceiling: int | None = None) -> None:
         raise ValueError(f"{name} must be a {requirement} integer")
 
 
+def _prune_destination_for_source(source: Path, destination: Path) -> Path:
+    """Keep a Windows destination comparable to the source's 8.3 spelling.
+
+    ``Path.resolve`` expands DOS short-name aliases. Without projecting a
+    canonical destination's relative suffix onto the *original* source path,
+    a destination within that source can be accidentally included in scans.
+    This function affects pruning only; it never grants traversal access.
+    """
+    if os.name != "nt":
+        return destination.resolve(strict=False)
+    target = destination.absolute()
+    try:
+        canonical_source = source.resolve(strict=True)
+        canonical_target = target.resolve(strict=False)
+        relative = canonical_target.relative_to(canonical_source)
+    except (OSError, RuntimeError, ValueError):
+        return target
+    return source.joinpath(*relative.parts)
+
+
 def _admit_source(root: RootConfig) -> tuple[Path, os.stat_result, Path]:
     if not isinstance(root, RootConfig):
         raise TypeError("roots must contain registered RootConfig objects")
@@ -92,11 +118,7 @@ def _admit_source(root: RootConfig) -> tuple[Path, os.stat_result, Path]:
         unsafe = unsafe or source != resolved
     if unsafe:
         raise ValueError(f"Source root must be a real, unlinked directory: {source}")
-    destination = (
-        Path(root.destination).absolute()
-        if os.name == "nt"
-        else Path(root.destination).resolve(strict=False)
-    )
+    destination = _prune_destination_for_source(source, Path(root.destination))
     return source, details, destination
 
 
@@ -190,13 +212,17 @@ def _enumerate_root(
                     budget[0] -= 1
                     if budget[0] < 0:
                         raise ValueError("max_entries exceeded during duplicate scan")
+                    path = directory / child.name
                     try:
-                        details = child.stat(follow_symlinks=False)
+                        details = (
+                            path.lstat()
+                            if _WINDOWS_NEEDS_PATH_LSTAT
+                            else child.stat(follow_symlinks=False)
+                        )
                     except FileNotFoundError:
                         continue
                     if _is_link(details):
                         continue
-                    path = directory / child.name
                     if destination == path or destination in path.parents:
                         continue
                     if stat.S_ISDIR(details.st_mode):

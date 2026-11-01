@@ -415,15 +415,19 @@ def _fetch_verified_windows(
     ):
         raise ArtifactError("artifact destination escapes its rooted Windows path")
 
+    phase = "initialize native API"
     try:
         api = _Win32Api()
+        phase = "validate fixed local drive"
         api.require_local_drive(drive)
         with ExitStack() as stack:
+            phase = "pin destination directory ancestors"
             parent_handle, root_info = _hold_directories(
                 api, _directory_chain(drive, root_parts), stack
             )
             current = str(root)
             for component in dest_parts[len(root_parts):-1]:
+                phase = "prepare and pin destination subdirectory"
                 current = current.rstrip("\\") + "\\" + component
                 try:
                     os.mkdir(current)
@@ -438,6 +442,7 @@ def _fetch_verified_windows(
                     raise ArtifactError("artifact parent traversed another volume")
                 parent_handle = handle
 
+            phase = "check destination vacancy"
             occupied = api.open(str(destination), missing_ok=True)
             if occupied is not None:
                 api.close(occupied)
@@ -449,6 +454,7 @@ def _fetch_verified_windows(
             # replace the staging file before the native rename completes.
             leaf = ".ocd-" + secrets.token_hex(24) + ".stage"
             stage = current.rstrip("\\") + "\\" + leaf
+            phase = "create unpublished staging file"
             stage_handle = api._create(
                 "\\\\?\\" + stage,
                 0x80000000 | 0x40000000 | 0x00010000,
@@ -461,24 +467,33 @@ def _fetch_verified_windows(
             published = False
             try:
                 # The CRT takes ownership of the Win32 handle on success.
+                phase = "adopt staging handle for verified download"
                 descriptor = msvcrt.open_osfhandle(stage_handle, os.O_BINARY | os.O_WRONLY)
                 stage_owned = False
                 target = os.fdopen(descriptor, "wb")
+                phase = "download and verify staging bytes"
                 _download_verified(entry, target, token_env=token_env, timeout=timeout)
+                phase = "revalidate staging file handle"
                 opened_info = _checked_info(api, stage_handle, directory=False)
                 if opened_info.volume != root_info.volume or opened_info.size != entry.size:
                     raise ArtifactError("unpublished Windows staging file changed")
 
+                phase = "recheck destination vacancy"
                 occupied = api.open(str(destination), missing_ok=True)
                 if occupied is not None:
                     api.close(occupied)
                     raise ArtifactError("destination already exists; existing files are never overwritten")
+                # The held destination-parent handle remains non-NULL; this
+                # is the anchored, no-replace destination namespace.  Never
+                # silently fall back to a CWD-relative or path-based rename.
+                phase = "native FileRenameInfo with pinned parent handle"
                 api.rename(stage_handle, parent_handle, dest_parts[-1])
                 published = True
                 # Re-check the *held* inode after SetFileInformationByHandle;
                 # opening the destination through the normal api.open would
                 # conflict with our stage handle's DELETE access because that
                 # helper intentionally excludes FILE_SHARE_DELETE.
+                phase = "revalidate published file handle"
                 info = _checked_info(api, stage_handle, directory=False)
                 if info.identity != opened_info.identity or info.size != entry.size:
                     raise ArtifactError("published Windows artifact changed identity")
@@ -504,7 +519,9 @@ def _fetch_verified_windows(
     except ArtifactError:
         raise
     except (OSError, UnsafeWindowsMove) as exc:
-        raise ArtifactError(f"secure Windows artifact publication failed: {exc}") from None
+        raise ArtifactError(
+            f"secure Windows artifact publication failed during {phase}: {exc}"
+        ) from None
 
 
 def fetch_verified(

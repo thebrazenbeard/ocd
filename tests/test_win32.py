@@ -34,6 +34,7 @@ class FakeWin32:
         self.renames = []
         self.on_rename = None
         self.volume_ok = True
+        self.directory_opens = []
 
     @staticmethod
     def dirinfo(file_id, *, volume=999, attrs=win32._FILE_ATTRIBUTE_DIRECTORY):
@@ -48,8 +49,10 @@ class FakeWin32:
         if not self.volume_ok:
             raise win32.UnsafeWindowsMove("drive is not local NTFS/ReFS")
 
-    def open(self, path, *, source=False, missing_ok=False):
+    def open(self, path, *, source=False, missing_ok=False, directory=False):
         self.calls.append(("open", path, source, missing_ok))
+        if directory:
+            self.directory_opens.append(path)
         if path not in self.entries:
             if missing_ok:
                 return None
@@ -107,6 +110,10 @@ class Win32RenameTests(unittest.TestCase):
         self.assertEqual(self.api.entries[self.destination].identity, (999, 55))
         self.assertEqual(self.api.handles, {})
         self.assertEqual(len(self.api.renames), 1)
+        self.assertEqual(
+            set(self.api.directory_opens),
+            {"C:\\", r"C:\incoming", r"C:\organized", r"C:\organized\Movies"},
+        )
         self.assertIn(("open", self.source, True, False), self.api.calls)
         self.assertIn(("open", self.destination, False, True), self.api.calls)
 
@@ -295,6 +302,11 @@ class Win32RenameTests(unittest.TestCase):
         api.open(self.destination)
         self.assertFalse(calls[1][1] & win32._DELETE)
 
+        api.open(r"C:\organized", directory=True)
+        self.assertTrue(calls[2][1] & win32._FILE_TRAVERSE)
+        self.assertTrue(calls[2][1] & win32._FILE_READ_ATTRIBUTES)
+        self.assertEqual(calls[2][2], win32._FILE_SHARE_READ | win32._FILE_SHARE_WRITE)
+
     def test_ctypes_adapter_uses_relative_parent_handle_and_nonreplace_class(self):
         api = object.__new__(win32._Win32Api)
         seen = []
@@ -312,6 +324,13 @@ class Win32RenameTests(unittest.TestCase):
         api.rename(101, 202, "target.mkv")
         self.assertEqual(seen[0][:5], (101, win32._FILE_RENAME_INFO_CLASS, 0, 202, "target.mkv"))
         self.assertGreaterEqual(seen[0][5], win32._FILE_RENAME_INFO.FileName.offset + 20)
+
+    def test_native_rename_failure_identifies_rejected_operation(self):
+        api = object.__new__(win32._Win32Api)
+        api._set = lambda *args: 0
+        api._win_error = lambda: OSError(87, "The parameter is incorrect")
+        with self.assertRaisesRegex(win32.UnsafeWindowsMove, "FileRenameInfo.*87"):
+            api.rename(101, 202, "target.mkv")
 
 
 if __name__ == "__main__":
