@@ -47,10 +47,27 @@ class DuplicateScannerTests(unittest.TestCase):
         self.write("different.bin", b"XY" * 8)  # same size, different bytes
         self.write("different-size.bin", b"ab" * 9)
 
-        result = scan_duplicates([self.root()], chunk_size=3)
+        # Include exact OS stat-field mismatches when a native Windows runner
+        # reports an unexpectedly unstable unmodified fixture.  The scanner
+        # itself must continue to fail closed on uncertain file identity.
+        mismatches = []
+        actual_matching = duplicate_module._matching
+
+        def record_mismatch(actual, expected):
+            accepted = actual_matching(actual, expected)
+            if not accepted:
+                fields = ("st_mode", "st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns", "st_nlink")
+                mismatches.append({
+                    key: (getattr(actual, key), getattr(expected, key))
+                    for key in fields if getattr(actual, key) != getattr(expected, key)
+                })
+            return accepted
+
+        with patch.object(duplicate_module, "_matching", side_effect=record_mismatch):
+            result = scan_duplicates([self.root()], chunk_size=3)
 
         self.assertEqual(result.files_scanned, 4)
-        self.assertEqual(result.files_hashed, 3, f"duplicate scan details: {result!r}")
+        self.assertEqual(result.files_hashed, 3, f"duplicate scan details: {result!r}; stat mismatches: {mismatches!r}")
         self.assertEqual(result.skipped_hardlinks, 0)
         self.assertEqual(result.skipped_unstable, ())
         self.assertEqual(len(result.groups), 1)
