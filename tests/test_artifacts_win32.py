@@ -89,7 +89,11 @@ class PortableNameTests(unittest.TestCase):
         self.assertEqual(calls[0], (1234, 4, b"\x01"))
 
 
-@unittest.skipUnless(os.name == "nt", "native Windows filesystem required")
+@unittest.skipUnless(
+    os.name == "nt" and os.environ.get("OCD_NATIVE_WINDOWS_QUALIFICATION") == "1",
+    "native Windows artifact publication fixtures require Windows and explicit "
+    "OCD_NATIVE_WINDOWS_QUALIFICATION=1 (manual qualification workflow)",
+)
 class NativeWindowsArtifactTests(unittest.TestCase):
     def setUp(self):
         qualification = mock.patch.dict(

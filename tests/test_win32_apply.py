@@ -69,7 +69,11 @@ class WindowsApplyGateTests(unittest.TestCase):
             self.assertFalse(destination.parent.exists())
 
 
-@unittest.skipUnless(os.name == "nt", "requires native Win32 handles")
+@unittest.skipUnless(
+    os.name == "nt" and os.environ.get("OCD_NATIVE_WINDOWS_QUALIFICATION") == "1",
+    "native Win32 rename fixtures require Windows and explicit "
+    "OCD_NATIVE_WINDOWS_QUALIFICATION=1 (manual qualification workflow)",
+)
 class NativeWin32RenameFixtureTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="ocd-native-win32-")

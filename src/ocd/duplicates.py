@@ -33,6 +33,12 @@ from .types import RootConfig
 # st_ino, and st_nlink, even for ordinary NTFS files. A separate Path.lstat()
 # is necessary before file identity, stability, and hardlink checks can work.
 _WINDOWS_NEEDS_PATH_LSTAT = os.name == "nt"
+# NTFS can finalize an inode's change/creation timestamp a few milliseconds
+# after a just-written file is closed. An enumerated candidate may therefore
+# have an older st_ctime_ns than the *same* file opened for hashing. Validate
+# its identity, size and mtime against enumeration, then use the opened handle
+# as the strict ctime baseline for every check while/after reading.
+_WINDOWS_CTIME_CAN_SETTLE = os.name == "nt"
 
 
 @dataclass(frozen=True)
@@ -233,7 +239,9 @@ def _enumerate_root(
                 raise ValueError(f"Directory changed during scan: {directory}")
 
 
-def _matching(details: os.stat_result, original: os.stat_result) -> bool:
+def _matching(
+    details: os.stat_result, original: os.stat_result, *, check_ctime: bool = True,
+) -> bool:
     return (
         stat.S_ISREG(details.st_mode)
         and not _is_link(details)
@@ -241,7 +249,7 @@ def _matching(details: os.stat_result, original: os.stat_result) -> bool:
         and details.st_ino == original.st_ino
         and details.st_size == original.st_size
         and details.st_mtime_ns == original.st_mtime_ns
-        and details.st_ctime_ns == original.st_ctime_ns
+        and (not check_ctime or details.st_ctime_ns == original.st_ctime_ns)
         and details.st_nlink == original.st_nlink
     )
 
@@ -277,12 +285,16 @@ def _hash_candidate(candidate: _Candidate, chunk_size: int) -> str | None:
             # Validate the complete ancestor chain and the leaf before open.
             if path.parent != source and not _check_directory(path.parent, source):
                 return None
-            if not _matching(path.lstat(), candidate.details):
+            if not _matching(
+                path.lstat(), candidate.details, check_ctime=not _WINDOWS_CTIME_CAN_SETTLE,
+            ):
                 return None
             fd = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOINHERIT", 0))
 
         before = os.fstat(fd)
-        if not _matching(before, candidate.details):
+        if not _matching(
+            before, candidate.details, check_ctime=not _WINDOWS_CTIME_CAN_SETTLE,
+        ):
             return None
         digest = hashlib.sha256()
         total = 0
@@ -295,7 +307,7 @@ def _hash_candidate(candidate: _Candidate, chunk_size: int) -> str | None:
         if total != candidate.file.size or not _matching(os.fstat(fd), before):
             return None
         if not _CAN_SCAN_FD:
-            if not _matching(path.lstat(), candidate.details):
+            if not _matching(path.lstat(), before):
                 return None
             if path.parent != source and not _check_directory(path.parent, source):
                 return None
