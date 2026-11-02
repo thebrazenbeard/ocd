@@ -100,8 +100,17 @@ class UsageTests(unittest.TestCase):
         (self.root / "good").write_bytes(b"ok")
         real_scandir = os.scandir
 
+        blocked_stat = blocked.stat()
+
         def deny(path):
-            if Path(path) == blocked:
+            if isinstance(path, int):
+                details = os.fstat(path)
+                target = (details.st_dev, details.st_ino) == (
+                    blocked_stat.st_dev, blocked_stat.st_ino
+                )
+            else:
+                target = Path(path) == blocked
+            if target:
                 raise PermissionError("mock access denied")
             return real_scandir(path)
 
