@@ -26,6 +26,7 @@ For machine-learning workflows, the target architecture keeps **code, manifests,
 | Inspect files and preview tagged moves | `scan` and `plan` are read-only |
 | Continuously observe changes | `watch` polls in the foreground and **reports only** |
 | Find exact-content duplicate candidates | `duplicates` reads sizes and SHA-256; no deletion |
+| Inspect bounded disk usage and largest files | `usage --path ABSOLUTE_DIR` reports logical sizes, top-level groups, optional POSIX allocation estimate and JSON; read-only; no cleanup or treemap |
 | Move tagged local files | Explicit `apply --yes` on **Linux only**, journaled and no-overwrite; not production-qualified |
 | Fetch a known remote artifact | Explicit manifest-based, size + SHA-256 verified download; Linux source-tested; experimental Windows publication **disabled by default** pending native qualification; not sync |
 | Cache known model/artifact bytes for a job | `cache import` / `cache materialize` content-addressed local staging on POSIX; no deletion, upload, or Windows qualification |
@@ -94,6 +95,23 @@ ocd --config ./ocd.json duplicates --max-files 10000 --max-entries 20000
 ```
 
 This compares exact-content SHA-256 hashes, skips hardlink aliases, and displays *estimated* reclaimable bytes. It does not delete or deduplicate files. Estimates may differ from actual disk space recovered because of compression, hardlinks, snapshots, and filesystem behavior.
+
+### Inspect disk usage (Windows/Linux, read-only)
+
+OCD can now inventory an **explicitly selected absolute directory or drive root** without organizer registration. This is a bounded, no-delete diagnostic, inspired by disk exploration in [MangoDisk](https://github.com/harry0703/MangoDisk), [WinDirStat](https://github.com/windirstat/windirstat), and [SquirrelDisk](https://github.com/adileo/squirreldisk). OCD does not incorporate those projects' code or invoke their applications.
+
+```powershell
+# Windows PowerShell: inspect C: and D: separately; no files are changed
+ocd usage --path C:\ --max-entries 100000 --top 20
+ocd usage --path D:\ --max-entries 100000 --top 20 --json
+```
+
+```sh
+# Linux: inspect a selected mounted directory
+ocd usage --path /srv/data --max-entries 100000 --top 20
+```
+
+The results rank the largest observed files and immediate top-level groups. **Logical bytes are not reclaimable bytes.** On Windows, allocated size is reported as unknown; where POSIX allocation metadata exists, its deduplicated block estimate is still not proof of reclaimable storage. Links/reparse points are not traversed; mount boundaries, inaccessible entries, depth limits, and exhausted budgets produce **incomplete** reports (nonzero exit code) rather than silent success. A scan is a point-in-time observation and cannot authorize deletion. Visual treemaps, persistent indexing, cleanup-rule packs, and remote SSH/cloud exploration are **not implemented**.
 
 ### 3. Optionally authorize a local move (Linux only)
 
