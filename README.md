@@ -27,7 +27,7 @@ For machine-learning workflows, the target architecture keeps **code, manifests,
 | Continuously observe changes | `watch` polls in the foreground and **reports only** |
 | Preserve bounded, read-only observations across manual restarts | `observe run` is an **opt-in foreground preview**: per-root scan budgets, a local SQLite event/checkpoint journal, pause/resume, no file moves; **not an installed service** |
 | Find exact-content duplicate candidates | `duplicates` reads sizes and SHA-256; no deletion |
-| Inspect bounded disk usage and largest files | `usage --path ABSOLUTE_DIR` reports logical sizes, top-level groups, optional POSIX allocation estimate and JSON; read-only; no cleanup or treemap |
+| Inspect bounded disk usage and largest files | `usage --path ABSOLUTE_DIR` reports logical sizes, top-level groups, optional POSIX allocation estimate, JSON, and an opt-in **static offline HTML treemap**; scanner is read-only, and HTML creation writes only the explicitly named new report file |
 | Review large-file cleanup observations | `cleanup review --path ABSOLUTE_DIR` lists large-file observations as **blocked** until independent retention/restore/live-use evidence and separate authorization exist; no deletion or reclaimable-byte claim |
 | Move tagged local files | Explicit `apply --yes` on **Linux only**, journaled and no-overwrite; not production-qualified |
 | Fetch a known remote artifact | Explicit manifest-based, size + SHA-256 verified download; Linux source-tested; experimental Windows publication **disabled by default** pending native qualification; not sync |
@@ -134,6 +134,8 @@ OCD can now inventory an **explicitly selected absolute directory or drive root*
 # Windows PowerShell: inspect C: and D: separately; no files are changed
 ocd usage --path C:\ --max-entries 100000 --top 20
 ocd usage --path D:\ --max-entries 100000 --top 20 --json
+# Optional standalone HTML report written to C: outside the selected D: scan
+ocd usage --path D:\ --max-entries 100000 --top 20 --html "$env:USERPROFILE\ocd-d-report.html"
 ```
 
 ```sh
@@ -141,7 +143,7 @@ ocd usage --path D:\ --max-entries 100000 --top 20 --json
 ocd usage --path /srv/data --max-entries 100000 --top 20
 ```
 
-The results rank the largest observed files and immediate top-level groups. **Logical bytes are not reclaimable bytes.** On Windows, allocated size is reported as unknown; where POSIX allocation metadata exists, its deduplicated block estimate is still not proof of reclaimable storage. Links/reparse points and detected cross-device mount directories are excluded; inaccessible entries, depth limits, and exhausted budgets produce **incomplete** reports (nonzero exit code). Same-device bind mounts may be indistinguishable from ordinary directories. Windows pathname enumeration cannot yet guarantee safety against concurrent malicious junction swaps; use trusted, stable folders. A scan is a point-in-time observation and cannot authorize deletion. Visual treemaps, persistent indexing, cleanup-rule packs, and remote SSH/cloud exploration are **not implemented**.
+The results rank the largest observed files and immediate top-level groups. **Logical bytes are not reclaimable bytes.** On Windows, allocated size is reported as unknown; where POSIX allocation metadata exists, its deduplicated block estimate is still not proof of reclaimable storage. Links/reparse points and detected cross-device mount directories are excluded; inaccessible entries, depth limits, and exhausted budgets produce **incomplete** reports (nonzero exit code). Same-device bind mounts may be indistinguishable from ordinary directories. Windows pathname enumeration cannot yet guarantee safety against concurrent malicious junction swaps; use trusted, stable folders. A scan is a point-in-time observation and cannot authorize deletion. The optional `--html ABSOLUTE_OUTPUT_FILE` emits a **static, self-contained, no-network treemap** of observed top-level logical bytes and largest files, refuses to overwrite existing files, and requires the output path outside the selected scan root. HTML creation is an explicit write of the report file only; it never modifies scanned content. Use a trusted, stable output directory: Windows cannot yet protect against a malicious concurrent parent-junction swap. On write failure, a partial report may remain; OCD never unlinks that path because it may have been replaced. A scan of the filesystem root `/` on Linux cannot create an HTML report under the same filesystem-root rule because every absolute output path is inside `/`; use JSON/text instead. This is not a live GUI, a reclaimable-space estimate, or an automatic cleaner. Persistent indexing, cleanup-rule packs, and remote SSH/cloud exploration are **not implemented**.
 
 ### Review cleanup observations without deleting (Windows/Linux)
 
