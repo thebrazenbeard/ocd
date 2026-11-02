@@ -374,6 +374,99 @@ def _posix_lock(state: Path) -> Iterator[Path]:
 
 
 @contextmanager
+def _windows_pin_state_chain(state: Path) -> Iterator[None]:
+    """Pin every profile-relative directory while holding a Windows lock.
+
+    A no-delete-sharing handle to the final sentinel alone cannot prevent a
+    validated parent from being swapped with a junction *before* it is opened.
+    Open each ancestor from LOCALAPPDATA outward, without following final
+    reparse points, verify the actual directory handles and reread their ACLs,
+    and keep all handles alive until the file lock has been released.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    class _FileInformation(ctypes.Structure):
+        _fields_ = [
+            ("attributes", wintypes.DWORD),
+            ("creation", wintypes.FILETIME),
+            ("access", wintypes.FILETIME),
+            ("write", wintypes.FILETIME),
+            ("volume", wintypes.DWORD),
+            ("size_high", wintypes.DWORD), ("size_low", wintypes.DWORD),
+            ("links", wintypes.DWORD),
+            ("index_high", wintypes.DWORD), ("index_low", wintypes.DWORD),
+        ]
+
+    dll = ctypes.WinDLL("kernel32", use_last_error=True)
+    dll.CreateFileW.argtypes = [
+        wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
+        wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+    ]
+    dll.CreateFileW.restype = wintypes.HANDLE
+    dll.GetFileInformationByHandle.argtypes = [
+        wintypes.HANDLE, ctypes.POINTER(_FileInformation),
+    ]
+    dll.GetFileInformationByHandle.restype = wintypes.BOOL
+    dll.GetVolumeInformationByHandleW.argtypes = [
+        wintypes.HANDLE, wintypes.LPWSTR, wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD), ctypes.POINTER(wintypes.DWORD),
+        ctypes.POINTER(wintypes.DWORD), wintypes.LPWSTR, wintypes.DWORD,
+    ]
+    dll.GetVolumeInformationByHandleW.restype = wintypes.BOOL
+    dll.CloseHandle.argtypes = [wintypes.HANDLE]
+    dll.CloseHandle.restype = wintypes.BOOL
+
+    profile = Path(os.environ["LOCALAPPDATA"])
+    try:
+        components = state.relative_to(profile).parts
+    except ValueError as exc:
+        raise UnsafeStateDirectory("Windows state escaped LOCALAPPDATA") from exc
+    current = profile
+    directory_handles: list[int] = []
+    try:
+        for component in (None, *components):
+            if component is not None:
+                current = current / component
+            # FILE_READ_ATTRIBUTES; FILE_SHARE_READ|FILE_SHARE_WRITE, explicitly
+            # no FILE_SHARE_DELETE; OPEN_EXISTING; BACKUP_SEMANTICS|OPEN_REPARSE.
+            handle = dll.CreateFileW(str(current), 0x80, 0x3, None, 3,
+                                     0x02200000, None)
+            if handle == ctypes.c_void_p(-1).value:
+                raise ctypes.WinError(ctypes.get_last_error())
+            directory_handles.append(handle)
+            details = _FileInformation()
+            if not dll.GetFileInformationByHandle(handle, ctypes.byref(details)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            if (
+                not details.attributes & 0x10  # FILE_ATTRIBUTE_DIRECTORY
+                or details.attributes & 0x400  # FILE_ATTRIBUTE_REPARSE_POINT
+                or not details.volume
+                or not (details.index_high or details.index_low)
+            ):
+                raise UnsafeStateDirectory(
+                    f"Windows state directory handle is reparse or unverified: {current}")
+            # ACL readback happens while this object and all its ancestors are
+            # held open against rename/delete; the path cannot be substituted.
+            _windows_check_private_acl(current)
+
+        filesystem = ctypes.create_unicode_buffer(32)
+        flags = wintypes.DWORD()
+        if not dll.GetVolumeInformationByHandleW(
+            directory_handles[-1], None, 0, None, None,
+            ctypes.byref(flags), filesystem, len(filesystem),
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+        if filesystem.value.upper() not in {"NTFS", "REFS"} or not flags.value & 0x8:
+            raise UnsafeStateDirectory(
+                "Windows state requires NTFS/ReFS with persistent ACLs")
+        yield
+    finally:
+        for handle in reversed(directory_handles):
+            dll.CloseHandle(handle)
+
+
+@contextmanager
 def _windows_lock(state: Path) -> Iterator[Path]:
     """One-byte native LockFileEx on a non-deletably shared Win32 handle.
 
@@ -501,7 +594,8 @@ def acquire_state_lock(directory: Path) -> Iterator[Path]:
         with _posix_lock(state) as lock_path:
             yield lock_path
     elif os.name == "nt":
-        with _windows_lock(state) as lock_path:
-            yield lock_path
+        with _windows_pin_state_chain(state):
+            with _windows_lock(state) as lock_path:
+                yield lock_path
     else:
         raise UnsafeStateDirectory("state locks unsupported on this OS")
