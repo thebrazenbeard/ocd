@@ -202,37 +202,49 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "artifact":
             from .artifacts import ArtifactError, fetch_verified, load_manifest
 
+            if args.artifact_command == "fetch":
+                # Keep the existing fetch error/status contract unchanged:
+                # invalid manifests/selections are CLI input errors (2), while
+                # a selected download failing verification is operational (1).
+                entries = load_manifest(args.manifest)
+                matches = tuple(entry for entry in entries if entry.destination_relpath == args.artifact)
+                if len(matches) != 1:
+                    raise ConfigError(f"artifact {args.artifact!r} is not present in manifest")
+                try:
+                    downloaded = fetch_verified(matches[0], args.destination_root)
+                except ArtifactError as exc:
+                    print(f"ocd: artifact fetch failed: {exc}", file=sys.stderr)
+                    return 1
+                print(f"Fetched and SHA-256 verified {downloaded}; existing files never overwritten")
+                return 0
+
             try:
                 entries = load_manifest(args.manifest)
                 matches = tuple(entry for entry in entries if entry.destination_relpath == args.artifact)
                 if len(matches) != 1:
-                    if args.artifact_command == "fetch":
-                        raise ConfigError(f"artifact {args.artifact!r} is not present in manifest")
                     raise ArtifactError(f"artifact {args.artifact!r} is not present in manifest")
-                if args.artifact_command == "verify":
-                    from .verification import verify_local_artifact
+                from .verification import verify_local_artifact
 
-                    verified = verify_local_artifact(matches[0], args.destination_root)
-                    if args.json:
-                        import json
+                verified = verify_local_artifact(matches[0], args.destination_root)
+                if args.json:
+                    import json
 
-                        print(json.dumps({
-                            "artifact": args.artifact,
-                            "path": str(verified.path),
-                            "size": verified.size,
-                            "sha256": verified.sha256,
-                            "verified": True,
-                            "deletion_eligible": False,
-                            "reclaimable_bytes": None,
-                        }, sort_keys=True))
-                    else:
-                        print(f"Verified existing artifact {verified.path}: "
-                              f"{verified.size} bytes, SHA-256 {verified.sha256}; "
-                              "read-only, no eviction authorized")
-                    return 0
-                downloaded = fetch_verified(matches[0], args.destination_root)
+                    print(json.dumps({
+                        "artifact": args.artifact,
+                        "path": str(verified.path),
+                        "size": verified.size,
+                        "sha256": verified.sha256,
+                        "verified": True,
+                        "deletion_eligible": False,
+                        "reclaimable_bytes": None,
+                    }, sort_keys=True))
+                else:
+                    print(f"Verified existing artifact {verified.path}: "
+                          f"{verified.size} bytes, SHA-256 {verified.sha256}; "
+                          "read-only, no eviction authorized")
+                return 0
             except ArtifactError as exc:
-                if args.artifact_command == "verify" and args.json:
+                if args.json:
                     import json
 
                     print(json.dumps({
@@ -243,10 +255,8 @@ def main(argv: list[str] | None = None) -> int:
                         "error": str(exc),
                     }, sort_keys=True))
                 else:
-                    print(f"ocd: artifact {args.artifact_command} failed: {exc}", file=sys.stderr)
+                    print(f"ocd: artifact verify failed: {exc}", file=sys.stderr)
                 return 1
-            print(f"Fetched and SHA-256 verified {downloaded}; existing files never overwritten")
-            return 0
 
         if args.command == "cache":
             # Cache operations are stand-alone, user-selected storage actions;
