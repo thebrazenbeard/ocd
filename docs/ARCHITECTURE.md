@@ -61,7 +61,11 @@ lock prevents two concurrently started observer processes from committing to
 the same state directory; after a crash, a leftover lock requires explicit
 operator recovery rather than unsafe automatic takeover. Symlink/reparse
 state paths, corrupted databases, and state inside a registered root fail
-closed. On restart, a complete rescan reconciles against the last committed
+closed; preexisting SQLite state must have OCD's application ID and complete
+expected schema before any write. POSIX state dirs must be user-owned and not
+group/other writable (custom Windows ACLs remain unqualified). Detected
+queued-directory and file-entry disappearance during bounded scans is
+incomplete/error, not a new checkpoint. On restart, a complete rescan reconciles against the last committed
 digest (including the disappearance of the final file). This is a *metadata
 snapshot*, not byte-content change detection or an automatic organizer.
 Nothing calls `apply_moves`, and no service is installed by this feature.
