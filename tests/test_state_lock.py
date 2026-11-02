@@ -99,6 +99,14 @@ class StateLockTests(unittest.TestCase):
                 with acquire_state_lock(unsafe):
                     self.fail("ambiguous state path")
 
+    @unittest.skipUnless(os.name == "posix", "POSIX platform rejection contract")
+    def test_macos_posix_branch_is_disabled_before_state_creation(self) -> None:
+        with mock.patch("sys.platform", "darwin"):
+            with self.assertRaises(UnsafeStateDirectory):
+                with acquire_state_lock(self.state):
+                    self.fail("macOS is not an OCD target platform")
+        self.assertFalse(self.state.exists())
+
     @unittest.skipUnless(os.name == "posix", "POSIX untrusted-ancestor permission boundary")
     def test_nonsticky_world_writable_ancestor_is_rejected_before_creation(self) -> None:
         unsafe_parent = self.parent / "anyone-can-rename"
