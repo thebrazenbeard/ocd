@@ -165,6 +165,8 @@ ocd artifact fetch --manifest ./artifacts.json \
 
 The fetcher verifies exact size and SHA-256 before no-overwrite publication. Linux uses POSIX anchored publication. An experimental native Windows publication path exists but **fails closed by default**. For disposable-fixture qualification only, an operator must deliberately set `OCD_EXPERIMENTAL_WINDOWS_ARTIFACT_PUBLISH=1` for the process; it has **not passed live NTFS/ReFS qualification** and must not be used for valuable files. The [manual native Windows qualification workflow](.github/workflows/ocd-native-windows-qualification.yml) keeps unfinished rename/publication tests separate from normal cross-platform source CI; these tests are not proof of a supported Windows mutation path. This **downloads** a named remote file; it cannot create cloud backups, upload weights, or synchronize locations.
 
+A native Lappy Windows disposable-fixture suite has now exercised the experimental anchored rename/publication primitives and passed six scenarios. This is not production qualification: Windows artifact publication remains off by default, and Windows organizing apply is still disabled.
+
 ### Verify a restored artifact independently (Windows/Linux, read-only)
 
 After a worker obtains an artifact through an authorized channel, OCD can check the **existing local file** against the same manifest without contacting GitHub or any remote server:

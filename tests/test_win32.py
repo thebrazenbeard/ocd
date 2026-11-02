@@ -265,10 +265,12 @@ class Win32RenameTests(unittest.TestCase):
                 identity=(999, 55), size=5, mtime_ns=123400,
             )
 
-    def test_file_rename_info_abi_and_relative_utf16_name(self):
+    def test_native_file_rename_info_abi_and_relative_utf16_name(self):
         # Portable fixed-width declarations must match the Win32 x86/x64 ABI,
         # including on Linux where c_wchar and c_ulong are wider.
         pointer_size = ctypes.sizeof(ctypes.c_void_p)
+        self.assertEqual(ctypes.sizeof(win32._IO_STATUS_BLOCK), 2 * pointer_size)
+        self.assertEqual(win32._IO_STATUS_BLOCK.Information.offset, pointer_size)
         self.assertEqual(win32._FILE_RENAME_INFO.RootDirectory.offset, 8 if pointer_size == 8 else 4)
         self.assertEqual(win32._FILE_RENAME_INFO.FileName.offset, 20 if pointer_size == 8 else 12)
         data, n = win32._rename_buffer(0xABC, "café.mkv")
@@ -312,25 +314,25 @@ class Win32RenameTests(unittest.TestCase):
         api = object.__new__(win32._Win32Api)
         seen = []
 
-        def set_info(source, kind, buffer, length):
+        def nt_set_info(source, io_status, buffer, length, kind):
             record = ctypes.cast(buffer, ctypes.POINTER(win32._FILE_RENAME_INFO)).contents
             filename = ctypes.string_at(
                 ctypes.addressof(buffer) + win32._FILE_RENAME_INFO.FileName.offset,
                 record.FileNameLength,
             ).decode("utf-16le")
             seen.append((source, kind, record.ReplaceIfExists, record.RootDirectory, filename, length))
-            return 1
+            return 0
 
-        api._set = set_info
+        api._nt_set = nt_set_info
         api.rename(101, 202, "target.mkv")
-        self.assertEqual(seen[0][:5], (101, win32._FILE_RENAME_INFO_CLASS, 0, 202, "target.mkv"))
+        self.assertEqual(seen[0][:5], (101, win32._NT_FILE_RENAME_INFORMATION_CLASS, 0, 202, "target.mkv"))
         self.assertGreaterEqual(seen[0][5], win32._FILE_RENAME_INFO.FileName.offset + 20)
 
-    def test_native_rename_failure_identifies_rejected_operation(self):
+    def test_native_rename_failure_identifies_rejected_operation_and_no_fallback(self):
         api = object.__new__(win32._Win32Api)
-        api._set = lambda *args: 0
-        api._win_error = lambda: OSError(87, "The parameter is incorrect")
-        with self.assertRaisesRegex(win32.UnsafeWindowsMove, "FileRenameInfo.*87"):
+        api._nt_set = lambda *args: -1073741811  # STATUS_INVALID_PARAMETER
+        api._set = lambda *args: self.fail("must not use unanchored Win32 fallback")
+        with self.assertRaisesRegex(win32.UnsafeWindowsMove, "NtSetInformationFile.*C000000D"):
             api.rename(101, 202, "target.mkv")
 
 
