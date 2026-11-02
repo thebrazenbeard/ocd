@@ -15,7 +15,50 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from ocd.state_lock import StateLockBusy, UnsafeStateDirectory, acquire_state_lock
+from ocd.state_lock import (
+    StateLockBusy,
+    UnsafeStateDirectory,
+    _linux_local_filesystem,
+    _windows_sid_length,
+    _windows_untrusted_writable_ace,
+    acquire_state_lock,
+)
+
+
+class WindowsAclPolicyTests(unittest.TestCase):
+    """Portable policy tests; Win32 readback still needs native qualification."""
+
+    def test_untrusted_read_only_ace_is_admissible(self) -> None:
+        # Lappy's CodexSandboxUsers LOCALAPPDATA inherited read/execute ACE.
+        self.assertFalse(_windows_untrusted_writable_ace(0, 0x1200A9, False))
+
+    def test_untrusted_write_or_delete_ace_is_refused(self) -> None:
+        for mask in (0x2, 0x4, 0x40, 0x100, 0x10000, 0x40000,
+                     0x80000, 0x40000000, 0x10000000):
+            with self.subTest(mask=hex(mask)):
+                self.assertTrue(_windows_untrusted_writable_ace(0, mask, False))
+
+    def test_owner_system_or_admin_allow_ace_is_admissible(self) -> None:
+        self.assertFalse(_windows_untrusted_writable_ace(0, 0x1F01FF, True))
+
+    def test_deny_ace_cannot_grant_write(self) -> None:
+        self.assertFalse(_windows_untrusted_writable_ace(1, 0x1F01FF, False))
+
+    def test_unknown_ace_type_fails_closed(self) -> None:
+        with self.assertRaises(UnsafeStateDirectory):
+            _windows_untrusted_writable_ace(5, 0x1F01FF, True)
+
+    def test_windows_ace_sid_length_is_bounded_before_native_equal_sid(self) -> None:
+        self.assertEqual(_windows_sid_length(16, b"\x01\x00\0\0\0\0\0\0"), 8)
+        self.assertEqual(_windows_sid_length(20, b"\x01\x01\0\0\0\0\0\0"), 12)
+        for size, prefix in (
+            (12, b"\x01\x00\0\0\0\0\0\0"),
+            (16, b"\x01\x01\0\0\0\0\0\0"),
+            (20, b"\x02\x01\0\0\0\0\0\0"),
+            (76, b"\x01\x10\0\0\0\0\0\0"),
+        ):
+            with self.subTest(size=size, prefix=prefix), self.assertRaises(UnsafeStateDirectory):
+                _windows_sid_length(size, prefix)
 
 
 class StateLockTests(unittest.TestCase):
@@ -30,7 +73,22 @@ class StateLockTests(unittest.TestCase):
                 self.fail("native Windows lock tests require existing LOCALAPPDATA")
             temporary = tempfile.TemporaryDirectory(prefix="ocd-state-lock-", dir=appdata)
         else:
-            temporary = tempfile.TemporaryDirectory(prefix="ocd-state-lock-")
+            temp_home = Path(tempfile.gettempdir())
+            if sys.platform.startswith("linux"):
+                try:
+                    _linux_local_filesystem(temp_home)
+                except UnsafeStateDirectory:
+                    # Docker/OCI may expose an unqualified OverlayFS as /tmp.
+                    # Use a genuine local tmpfs for behavioral lock tests,
+                    # never disable the safety boundary to make tests pass.
+                    temp_home = Path("/dev/shm")
+                    try:
+                        _linux_local_filesystem(temp_home)
+                    except UnsafeStateDirectory:
+                        self.skipTest("no qualified local filesystem for lock fixtures")
+                    if not os.access(temp_home, os.W_OK):
+                        self.skipTest("qualified local tmpfs is not writable")
+            temporary = tempfile.TemporaryDirectory(prefix="ocd-state-lock-", dir=temp_home)
         self.addCleanup(temporary.cleanup)
         self.parent = Path(temporary.name)
         self.state = self.parent / "private-state"

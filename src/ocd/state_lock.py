@@ -2,8 +2,9 @@
 
 The lock file is permanent: unlinking it could let different processes lock
 different inodes for the same logical state. This module assumes cooperating
-processes under the same OS account; malicious same-UID path replacement and
-network filesystems are outside its initial security contract.
+processes under the same OS account; malicious same-UID path replacement is
+outside its initial security contract. Unqualified or network mount types are
+rejected on Linux; their ``flock`` behavior is not assumed to be local.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ from contextlib import contextmanager
 import errno
 import os
 from pathlib import Path
+import re
 import stat
 import sys
 from typing import Iterator
@@ -19,6 +21,26 @@ from typing import Iterator
 
 _LOCK_NAME = "observer.lock"
 _REPARSE = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+_WINDOWS_WRITE_BITS = (
+    0x00000002  # FILE_WRITE_DATA / FILE_ADD_FILE
+    | 0x00000004  # FILE_APPEND_DATA / FILE_ADD_SUBDIRECTORY
+    | 0x00000010  # FILE_WRITE_EA
+    | 0x00000040  # FILE_DELETE_CHILD (directory)
+    | 0x00000100  # FILE_WRITE_ATTRIBUTES
+    | 0x00010000  # DELETE
+    | 0x00040000  # WRITE_DAC
+    | 0x00080000  # WRITE_OWNER
+    | 0x02000000  # MAXIMUM_ALLOWED (cannot prove bounded permissions)
+    | 0x10000000  # GENERIC_ALL
+    | 0x40000000  # GENERIC_WRITE
+)
+# Unknown filesystems fail closed: writable OverlayFS may itself be backed by
+# remote storage, and its underlying storage cannot be proved from mountinfo.
+_LOCAL_LINUX_FILESYSTEMS = frozenset({
+    "ext2", "ext3", "ext4", "xfs", "btrfs", "f2fs", "zfs", "bcachefs",
+    "tmpfs", "ramfs", "jfs", "nilfs2",
+})
+_MOUNTINFO_ESCAPE = re.compile(r"\\([0-7]{3})")
 
 
 class UnsafeStateDirectory(OSError):
@@ -27,6 +49,216 @@ class UnsafeStateDirectory(OSError):
 
 class StateLockBusy(OSError):
     """Another process holds the kernel lock."""
+
+
+def _windows_untrusted_writable_ace(ace_type: int, mask: int, trusted: bool) -> bool:
+    """Fail-closed ACL policy; not a substitute for native Win32 DACL readback.
+
+    Windows file/directory ACCESS_ALLOWED_ACE = 0, ACCESS_DENIED_ACE = 1.
+    An unrecognized entry type (e.g. an object ACE with a different SID
+    position) must never be interpreted as a harmless allow entry.
+    """
+    if ace_type == 1:
+        return False
+    if ace_type != 0:
+        raise UnsafeStateDirectory("unsupported Windows DACL ACE type")
+    return bool(mask & _WINDOWS_WRITE_BITS) and not trusted
+
+
+def _windows_sid_length(ace_size: int, sid_prefix: bytes) -> int:
+    """Bound a standard allow/deny ACE SID before handing it to Win32.
+
+    ACCESS_ALLOWED_ACE and ACCESS_DENIED_ACE place their SID at byte 8.
+    A SID has an 8-byte fixed prefix and at most 15 DWORD subauthorities.
+    Reject truncated or malformed ACEs rather than letting EqualSid inspect
+    bytes beyond the ACE boundary.
+    """
+    if len(sid_prefix) != 8 or ace_size < 16:
+        raise UnsafeStateDirectory("invalid Windows ACL ACE/SID length")
+    revision, count = sid_prefix[0], sid_prefix[1]
+    sid_size = 8 + 4 * count
+    if revision != 1 or count > 15 or 8 + sid_size > ace_size:
+        raise UnsafeStateDirectory("invalid Windows ACL ACE/SID length")
+    return sid_size
+
+
+def _windows_check_private_acl(path: Path) -> None:
+    """Read existing native NTFS/ReFS ownership/DACL; never rewrite an ACL.
+
+    An untrusted principal may receive read/execute, but not any file-system
+    write/delete/ownership rights. The current token owner, LOCAL SYSTEM and
+    BUILTIN Administrators are the only allowed writable ACE trustees. This
+    cannot eliminate malicious same-user replacement or ancestor TOCTOU.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    advapi = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    advapi.OpenProcessToken.argtypes = [wintypes.HANDLE, wintypes.DWORD,
+                                        ctypes.POINTER(wintypes.HANDLE)]
+    advapi.OpenProcessToken.restype = wintypes.BOOL
+    advapi.GetTokenInformation.argtypes = [wintypes.HANDLE, wintypes.DWORD,
+                                            ctypes.c_void_p, wintypes.DWORD,
+                                            ctypes.POINTER(wintypes.DWORD)]
+    advapi.GetTokenInformation.restype = wintypes.BOOL
+    advapi.GetNamedSecurityInfoW.argtypes = [wintypes.LPWSTR, wintypes.DWORD,
+                                              wintypes.DWORD,
+                                              ctypes.POINTER(ctypes.c_void_p),
+                                              ctypes.c_void_p,
+                                              ctypes.POINTER(ctypes.c_void_p),
+                                              ctypes.c_void_p,
+                                              ctypes.POINTER(ctypes.c_void_p)]
+    advapi.GetNamedSecurityInfoW.restype = wintypes.DWORD
+    advapi.GetAclInformation.argtypes = [ctypes.c_void_p, ctypes.c_void_p,
+                                         wintypes.DWORD, wintypes.DWORD]
+    advapi.GetAclInformation.restype = wintypes.BOOL
+    advapi.GetAce.argtypes = [ctypes.c_void_p, wintypes.DWORD,
+                              ctypes.POINTER(ctypes.c_void_p)]
+    advapi.GetAce.restype = wintypes.BOOL
+    advapi.EqualSid.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    advapi.EqualSid.restype = wintypes.BOOL
+    advapi.ConvertStringSidToSidW.argtypes = [wintypes.LPCWSTR,
+                                               ctypes.POINTER(ctypes.c_void_p)]
+    advapi.ConvertStringSidToSidW.restype = wintypes.BOOL
+    kernel.GetCurrentProcess.argtypes = []
+    kernel.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    kernel.LocalFree.argtypes = [ctypes.c_void_p]
+    kernel.LocalFree.restype = ctypes.c_void_p
+
+    token = wintypes.HANDLE()
+    if not advapi.OpenProcessToken(kernel.GetCurrentProcess(), 0x0008, ctypes.byref(token)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        needed = wintypes.DWORD()
+        # TokenUser = 1: the first member of TOKEN_USER is SID_AND_ATTRIBUTES.Sid.
+        advapi.GetTokenInformation(token, 1, None, 0, ctypes.byref(needed))
+        if not needed.value:
+            raise ctypes.WinError(ctypes.get_last_error())
+        token_data = ctypes.create_string_buffer(needed.value)
+        if not advapi.GetTokenInformation(token, 1, token_data, needed,
+                                           ctypes.byref(needed)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        user_sid = ctypes.cast(token_data, ctypes.POINTER(ctypes.c_void_p)).contents.value
+        if not user_sid:
+            raise UnsafeStateDirectory("Windows token owner SID is unavailable")
+
+        system_sid = ctypes.c_void_p()
+        admin_sid = ctypes.c_void_p()
+        if not advapi.ConvertStringSidToSidW("S-1-5-18", ctypes.byref(system_sid)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            if not advapi.ConvertStringSidToSidW("S-1-5-32-544", ctypes.byref(admin_sid)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            try:
+                owner = ctypes.c_void_p()
+                dacl = ctypes.c_void_p()
+                descriptor = ctypes.c_void_p()
+                # SE_FILE_OBJECT = 1; OWNER_SECURITY_INFORMATION | DACL = 5.
+                status = advapi.GetNamedSecurityInfoW(
+                    str(path), 1, 5, ctypes.byref(owner), None,
+                    ctypes.byref(dacl), None, ctypes.byref(descriptor),
+                )
+                if status:
+                    raise OSError(status, f"cannot inspect Windows state DACL: {path}")
+                try:
+                    if (not owner.value or not dacl.value or
+                            not advapi.EqualSid(owner, user_sid)):
+                        raise UnsafeStateDirectory(
+                            f"Windows state owner or DACL is unsafe: {path}")
+
+                    class _AclSize(ctypes.Structure):
+                        _fields_ = [("ace_count", wintypes.DWORD),
+                                    ("bytes_in_use", wintypes.DWORD),
+                                    ("bytes_free", wintypes.DWORD)]
+
+                    size = _AclSize()
+                    # AclSizeInformation = 2.
+                    if not advapi.GetAclInformation(dacl, ctypes.byref(size),
+                                                   ctypes.sizeof(size), 2):
+                        raise ctypes.WinError(ctypes.get_last_error())
+                    for i in range(size.ace_count):
+                        ace = ctypes.c_void_p()
+                        if not advapi.GetAce(dacl, i, ctypes.byref(ace)):
+                            raise ctypes.WinError(ctypes.get_last_error())
+                        header = ctypes.string_at(ace.value, 4)
+                        ace_type = header[0]
+                        ace_size = int.from_bytes(header[2:4], "little")
+                        if ace_type not in (0, 1) or ace_size < 16:
+                            raise UnsafeStateDirectory(
+                                f"unsupported or truncated Windows DACL ACE on {path}")
+                        mask = int.from_bytes(ctypes.string_at(ace.value + 4, 4), "little")
+                        _windows_sid_length(ace_size, ctypes.string_at(ace.value + 8, 8))
+                        trustee = ctypes.c_void_p(ace.value + 8)
+                        trusted = any(advapi.EqualSid(trustee, sid) for sid in
+                                      (user_sid, system_sid, admin_sid))
+                        if _windows_untrusted_writable_ace(ace_type, mask, trusted):
+                            raise UnsafeStateDirectory(
+                                f"Windows state has an untrusted writable ACE: {path}")
+                finally:
+                    if descriptor.value:
+                        kernel.LocalFree(descriptor)
+            finally:
+                if admin_sid.value:
+                    kernel.LocalFree(admin_sid)
+        finally:
+            if system_sid.value:
+                kernel.LocalFree(system_sid)
+    finally:
+        kernel.CloseHandle(token)
+
+
+def _windows_check_state_acl_chain(state: Path) -> None:
+    """Inspect LOCALAPPDATA, every child ancestor, and the state directory."""
+    appdata = Path(os.environ["LOCALAPPDATA"])
+    current = appdata
+    _windows_check_private_acl(current)
+    for component in state.relative_to(appdata).parts:
+        current = current / component
+        _windows_check_private_acl(current)
+
+
+def _linux_local_filesystem(path: Path) -> None:
+    """Refuse unqualified Linux mounts before creating/opening the sentinel.
+
+    ``/proc/self/mountinfo`` names the actual mount namespace (including bind
+    mounts) and its filesystem type. A missing, malformed, or ambiguous view
+    is a refusal, not permission to fall back to unverified ``flock`` behavior.
+    Linux mount changes by privileged actors during acquisition remain outside
+    the single-account, local-filesystem contract.
+    """
+    try:
+        lines = Path("/proc/self/mountinfo").read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError) as exc:
+        raise UnsafeStateDirectory("cannot verify Linux state filesystem") from exc
+
+    matches: list[tuple[int, str]] = []
+    for line in lines:
+        header, separator, trailer = line.partition(" - ")
+        mount_fields = header.split()
+        fs_fields = trailer.split()
+        if not separator or len(mount_fields) < 6 or len(fs_fields) < 3:
+            raise UnsafeStateDirectory("malformed Linux mountinfo")
+        encoded_mount = mount_fields[4]
+        mount_text = _MOUNTINFO_ESCAPE.sub(
+            lambda match: chr(int(match.group(1), 8)), encoded_mount
+        )
+        if "\\" in mount_text or not mount_text.startswith("/"):
+            raise UnsafeStateDirectory("ambiguous Linux mountinfo path")
+        mount = Path(mount_text)
+        if mount == path or mount in path.parents:
+            matches.append((len(mount.parts), fs_fields[0].lower()))
+
+    if not matches:
+        raise UnsafeStateDirectory("Linux state mount not identified")
+    best_length = max(length for length, _ in matches)
+    current = [fstype for length, fstype in matches if length == best_length]
+    if len(current) != 1 or current[0] not in _LOCAL_LINUX_FILESYSTEMS:
+        raise UnsafeStateDirectory(
+            "Linux state must reside on an independently identifiable local filesystem"
+        )
 
 
 def _is_link(info: os.stat_result) -> bool:
@@ -85,6 +317,8 @@ def _private_state_dir(value: Path) -> Path:
         item.st_uid != os.geteuid() or stat.S_IMODE(item.st_mode) & 0o077
     ):
         raise UnsafeStateDirectory("state directory is not owned and private (0700)")
+    if os.name == "nt":
+        _windows_check_state_acl_chain(path)
     return path
 
 
@@ -216,6 +450,9 @@ def _windows_lock(state: Path) -> Iterator[Path]:
         now = path.lstat()
         if _is_link(now) or not stat.S_ISREG(now.st_mode):
             raise UnsafeStateDirectory("Windows lock pathname is unsafe")
+        # A fresh OPEN_ALWAYS lock file can inherit an unsafe DACL even when
+        # state parent checks passed; read back the file's own security data.
+        _windows_check_private_acl(path)
         # Lock one byte starting at offset zero, fail immediately on overlap.
         if not dll.LockFileEx(handle, 0x00000003, 0, 1, 0, ctypes.byref(region)):
             error = ctypes.get_last_error()
@@ -247,6 +484,8 @@ def acquire_state_lock(directory: Path) -> Iterator[Path]:
         raise UnsafeStateDirectory("state locks support Windows and Linux only")
     if os.name == "nt" and os.environ.get("OCD_EXPERIMENTAL_WINDOWS_STATE_LOCK") != "1":
         raise UnsafeStateDirectory("experimental Windows state lock disabled until native qualification")
+    if sys.platform.startswith("linux"):
+        _linux_local_filesystem(Path(directory))
     state = _private_state_dir(Path(directory))
     if sys.platform.startswith("linux"):
         with _posix_lock(state) as lock_path:
