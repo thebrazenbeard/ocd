@@ -28,3 +28,5 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Verify CLI entry point
         run: python -m ocd --help
+      - name: Verify installed wheel outside source checkout
+        run: python tests/verify_wheel_install.py
