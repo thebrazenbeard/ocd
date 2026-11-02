@@ -89,7 +89,7 @@ ocd [--config PATH] scan [--root SOURCE]
 ocd [--config PATH] plan [--root SOURCE]
 ocd [--config PATH] watch [--root SOURCE] [--interval SECONDS]
 ocd [--config PATH] duplicates [--root SOURCE] [--max-files NUMBER] [--max-entries NUMBER]
-ocd usage --path ABSOLUTE_DIRECTORY [--max-entries NUMBER] [--max-depth NUMBER] [--top NUMBER] [--json] [--html NEW_ABSOLUTE_OUTPUT_FILE]
+ocd usage --path ABSOLUTE_DIRECTORY [--max-entries NUMBER] [--max-depth NUMBER] [--top NUMBER] [--json | --html NEW_ABSOLUTE_OUTPUT_FILE]
 ocd cleanup review --path ABSOLUTE_DIRECTORY [--max-entries NUMBER] [--max-depth NUMBER] [--top NUMBER] [--json]
 ocd [--config PATH] apply --root SOURCE --yes
 ocd artifact fetch --manifest JSON --destination-root EXISTING_ABSOLUTE_DIR --artifact DESTINATION_RELPATH
