@@ -26,6 +26,11 @@ def _size(value: int) -> str:
     return f"{value:,} bytes"
 
 
+def _html(value: str) -> str:
+    """Escape markup and represent POSIX surrogateescape bytes as literal escapes."""
+    return escape(value.encode("utf-8", "backslashreplace").decode("utf-8"))
+
+
 def _within(path: Path, root: Path) -> bool:
     """Lexical or resolved containment; invalid/cross-volume pairs are outside."""
     try:
@@ -102,7 +107,7 @@ def render_usage_html(report: UsageReport) -> str:
         dy = min(2.0, h / 4)
         x, y, w, h = x + dx, y + dy, max(0, w - 2 * dx), max(0, h - 2 * dy)
         color = _PALETTE[index % len(_PALETTE)]
-        tooltip = escape(f"{label}: {_size(size)}")
+        tooltip = _html(f"{label}: {_size(size)}")
         rectangles.append(
             f'<g><rect x="{x:.2f}" y="{y:.2f}" width="{w:.2f}" '
             f'height="{h:.2f}" rx="4" fill="{color}">'
@@ -114,12 +119,12 @@ def render_usage_html(report: UsageReport) -> str:
             rectangles.append(
                 f'<text x="{x + 10:.2f}" y="{y + 27:.2f}" '
                 'fill="white" font-size="18" font-weight="600">'
-                f'{escape(short_label)}</text>'
+                f'{_html(short_label)}</text>'
             )
             rectangles.append(
                 f'<text x="{x + 10:.2f}" y="{y + 49:.2f}" '
                 'fill="white" font-size="14">'
-                f'{escape(_size(size))}</text>'
+                f'{_html(_size(size))}</text>'
             )
         rectangles.append("</g>")
 
@@ -133,11 +138,11 @@ def render_usage_html(report: UsageReport) -> str:
         )
 
     rows = "".join(
-        "<tr><td>" + escape(str(item.path)) + "</td><td class=\"number\">"
-        + escape(_size(item.logical_bytes)) + "</td></tr>"
+        "<tr><td>" + _html(str(item.path)) + "</td><td class=\"number\">"
+        + _html(_size(item.logical_bytes)) + "</td></tr>"
         for item in report.largest_files
     ) or '<tr><td colspan="2">No regular files observed.</td></tr>'
-    issues = "".join("<li>" + escape(issue) + "</li>" for issue in report.issues)
+    issues = "".join("<li>" + _html(issue) + "</li>" for issue in report.issues)
     issues_html = (
         '<section class="issues"><h2>Incomplete scan reasons</h2><ul>'
         + issues + "</ul></section>"
@@ -165,7 +170,7 @@ def render_usage_html(report: UsageReport) -> str:
         ".number{text-align:right;width:190px}.issues{color:#ffd4b9}"
         ".empty{padding:48px;text-align:center;background:#192c3e}</style></head><body>"
         "<h1>OCD — disk usage snapshot</h1>"
-        f'<p class="meta">Selected root: <code>{escape(str(report.root))}</code></p>'
+        f'<p class="meta">Selected root: <code>{_html(str(report.root))}</code></p>'
         f'<p class="status {state_class}">{state}</p>'
         '<p class="warning"><strong>Read-only observation.</strong> '
         "Rectangle area represents observed <em>logical bytes</em>, not "
@@ -176,7 +181,7 @@ def render_usage_html(report: UsageReport) -> str:
         f'{report.files:,} files; {report.directories:,} directories; '
         f'{report.skipped_links:,} links skipped; {report.skipped_special:,} special skipped. '
         f'Observed logical total: {_size(report.logical_bytes)}. '
-        f'Physical allocation: {escape(allocated)}.</p>'
+        f'Physical allocation: {_html(allocated)}.</p>'
         "<h2>Top-level groups</h2>" + diagram
         + "<h2>Largest observed files</h2><table><thead><tr>"
         "<th>File</th><th class=\"number\">Logical bytes</th>"
@@ -201,6 +206,7 @@ def write_usage_html(report: UsageReport, output: Path) -> None:
         raise ValueError("--html parent must be an existing real directory")
 
     # Reject symlinks and Windows reparse points in every ancestor.
+    parent_identity = parent.lstat()
     for ancestor in (parent, *parent.parents):
         try:
             identity = ancestor.lstat()
@@ -218,8 +224,32 @@ def write_usage_html(report: UsageReport, output: Path) -> None:
 
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     payload = render_usage_html(report).encode("utf-8")
-    fd = os.open(output, flags, 0o600)
+    parent_fd: int | None = None
+    fd = -1
     try:
+        if os.name != "nt":
+            # Pin the verified parent on Linux: no pathname-based opening after
+            # this point, even if an ancestor is swapped concurrently.
+            directory_flags = (
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+                | getattr(os, "O_CLOEXEC", 0)
+            )
+            parent_fd = os.open(parent, directory_flags)
+            opened = os.fstat(parent_fd)
+            if (opened.st_dev, opened.st_ino) != (
+                parent_identity.st_dev, parent_identity.st_ino
+            ):
+                raise ValueError("--html output parent changed during validation")
+            fd = os.open(output.name, flags, 0o600, dir_fd=parent_fd)
+        else:
+            # Windows has no qualified anchored creation path here; restrict
+            # reports to trusted, stable parents and recheck before writing.
+            fd = os.open(output, flags, 0o600)
+            observed = parent.lstat()
+            if (_is_link(observed) or
+                (observed.st_dev, observed.st_ino) !=
+                (parent_identity.st_dev, parent_identity.st_ino)):
+                raise ValueError("--html output parent changed during publication")
         with os.fdopen(fd, "wb") as handle:
             fd = -1
             handle.write(payload)
@@ -228,7 +258,9 @@ def write_usage_html(report: UsageReport, output: Path) -> None:
     except BaseException:
         if fd >= 0:
             os.close(fd)
-        # This path was created exclusively by this call. Remove only that
-        # unfinished output, leaving every scan target and prior file intact.
-        output.unlink(missing_ok=True)
+        # Never unlink by path on failure: another process may have replaced
+        # that path. A partial report can remain for explicit operator review.
         raise
+    finally:
+        if parent_fd is not None:
+            os.close(parent_fd)

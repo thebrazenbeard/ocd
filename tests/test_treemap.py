@@ -8,6 +8,7 @@ from pathlib import Path
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from ocd.cli import main
 from ocd.treemap import render_usage_html, write_usage_html
@@ -115,6 +116,50 @@ class TreemapTests(unittest.TestCase):
         self.assertIn("eligible", html)
         self.assertNotIn("delete-button", html)
         self.assertNotIn("fetch(", html)
+
+    def test_failed_write_never_unlinks_output_by_path(self):
+        report = scan_usage(self.root)
+        target = self.out / "partial.html"
+        with (
+            patch("ocd.treemap.os.fsync", side_effect=OSError("injected write failure")),
+            patch.object(Path, "unlink", side_effect=AssertionError("unowned unlink")) as unlink,
+        ):
+            with self.assertRaisesRegex(OSError, "injected write failure"):
+                write_usage_html(report, target)
+            unlink.assert_not_called()
+        self.assertTrue(target.is_file(), "partial report must remain for explicit review")
+
+    @unittest.skipIf(os.name == "nt", "POSIX rename while an output handle is open")
+    def test_swapped_output_survives_write_failure(self):
+        report = scan_usage(self.root)
+        target = self.out / "report.html"
+        other = self.out / "unrelated"
+        other.write_bytes(b"do not delete someone else's file")
+
+        def swap_then_fail(_fd):
+            target.rename(self.out / "original-partial.html")
+            other.rename(target)
+            raise OSError("injected failure after pathname replacement")
+
+        with patch("ocd.treemap.os.fsync", side_effect=swap_then_fail):
+            with self.assertRaisesRegex(OSError, "injected failure"):
+                write_usage_html(report, target)
+        self.assertEqual(target.read_bytes(), b"do not delete someone else's file")
+        self.assertTrue((self.out / "original-partial.html").is_file())
+
+    @unittest.skipIf(os.name == "nt", "POSIX surrogateescape filename contract")
+    def test_non_utf8_filename_is_safely_rendered(self):
+        name = os.fsdecode(b"bad-\xff.bin")
+        if "\udcff" not in name:
+            self.skipTest("filesystem does not use surrogateescape")
+        (self.root / name).write_bytes(b"x" * 10)
+        report = scan_usage(self.root)
+        html = render_usage_html(report)
+        self.assertIn(r"\udcff", html)
+        self.assertNotIn("\udcff", html)
+        target = self.out / "report.html"
+        write_usage_html(report, target)
+        self.assertIn(r"\udcff", target.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
