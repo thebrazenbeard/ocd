@@ -14,7 +14,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from ocd.monitor import MonitorEvent, watch_roots
-from ocd.scanner import scan_root as real_scan_root
+from ocd.scanner import ScanBudget, scan_root as real_scan_root
 from ocd.types import RootConfig
 
 
@@ -76,6 +76,52 @@ class MonitorTests(unittest.TestCase):
         self.assertTrue(untagged.exists())
         self.assertFalse((self.destination / "Photos").exists())
         self.assertEqual(stop.waits, [0.01, 0.01])
+
+    def test_budget_exhaustion_is_error_not_partial_change_then_recovers(self) -> None:
+        first = self.file("a.jpg")
+        remaining = self.file("b.jpg")
+        events: list[MonitorEvent] = []
+
+        def receive(event: MonitorEvent) -> None:
+            events.append(event)
+            if event.kind == "error":
+                first.unlink()  # Test fixture recovery; watcher itself never deletes.
+
+        with patch("ocd.apply.apply_moves", side_effect=AssertionError("watch applied moves")):
+            watch_roots((self.root(mode="apply"),), receive, stop_event=RecordingEvent(),
+                        max_polls=3, interval_seconds=0.001,
+                        scan_budget=ScanBudget(max_entries=1))
+
+        self.assertEqual([event.kind for event in events], ["error", "change"])
+        self.assertIn("ScanBudgetExceeded", events[0].error)
+        self.assertEqual(events[0].files, ())
+        self.assertIsNone(events[0].plan)
+        self.assertEqual([entry.path for entry in events[1].files], [remaining])
+        self.assertTrue(remaining.exists())
+        self.assertFalse((self.destination / "Photos").exists())
+
+    def test_one_budget_exhausted_root_does_not_block_other_root(self) -> None:
+        self.file("a.jpg")
+        self.file("b.jpg")
+        other_source = self.base / "second-source"
+        other_dest = self.base / "second-dest"
+        other_source.mkdir()
+        other_dest.mkdir()
+        other_file = self.file("safe.jpg", source=other_source)
+        events: list[MonitorEvent] = []
+        watch_roots((self.root(), self.root(source=other_source, destination=other_dest)),
+                    events.append, stop_event=RecordingEvent(), max_polls=2,
+                    scan_budget=ScanBudget(max_entries=1))
+        self.assertEqual([event.kind for event in events], ["error", "change"])
+        self.assertIn("ScanBudgetExceeded", events[0].error)
+        self.assertEqual([entry.path for entry in events[1].files], [other_file])
+
+    def test_invalid_scan_budget_rejected_before_first_poll(self) -> None:
+        with patch("ocd.monitor.scan_root") as scan:
+            with self.assertRaises(TypeError):
+                watch_roots((self.root(),), lambda _: None, stop_event=Event(),
+                            max_polls=1, scan_budget=object())
+        scan.assert_not_called()
 
     def test_added_and_removed_files_emit_changed_full_snapshots(self) -> None:
         original = self.file("one.jpg")
