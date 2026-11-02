@@ -1,12 +1,19 @@
 # OCD — Organized & Clean Disk
 
-**Vision: put tagged folders on autopilot across Windows, Linux, local drives, and cloud storage.**
+**Organize tagged spaces; understand disk usage; move only what is proven safe.**
 
-OCD is being rebuilt as an installable storage organizer. You choose which folders it may monitor, tag what belongs where, and define local or cloud destinations. OCD's intended job is to watch for changes, propose safe organization, and—once authorized and fully qualified—keep those spaces organized without requiring you to manually sort every new file.
+OCD is the planned **Windows/Linux application and architecture** for monitoring folders you register, applying your organization tags, and managing authorized local or cloud storage destinations. Once the installed product is qualified, it should keep those spaces organized without manual sorting. The user controls which roots, rules, and effects are authorized. macOS is not a target.
 
-The goal is straightforward: files should have a home, storage should be understandable, and a developer workstation shouldn't need to permanently retain every model, archive, training checkpoint, or duplicate.
+**What is available now:** a source-installable, command-line **developer preview**, not a resident organizer or cloud manager. It can inspect disk usage (including a static offline HTML treemap), scan and plan tagged local moves, report foreground polling observations, identify exact duplicate *candidates*, and verify pinned artifact bytes. It does **not** auto-delete, perform cloud sync, or run as a qualified installed service. Linux's explicit move path is experimental; Windows moves and artifact publication remain fail-closed for production use. The Python wheel is smoke-tested on Windows and Linux, but there is no native installer or GUI.
 
-**Development status:** The repository currently contains a *developer preview* of the local organizer, not the finished always-on application described above. The preview can monitor registered folders by polling and **report** proposed moves; it does **not** automatically move them. Explicit local moves are implemented for Linux test fixtures; Windows moves remain disabled pending native safety qualification. Cloud storage accounts, remote organization, automatic scheduling, and native installers are not implemented. Optional observe-only startup templates exist, but they are not a managed organizing service. See [what works now](#what-works-today) and the [product milestones](docs/PRODUCT_VISION.md).
+**Pick a starting point:**
+
+- **Find what filled a drive:** [read-only disk usage and static treemap](#inspect-disk-usage-windowslinux-read-only).
+- **Tag and plan local files:** [register and observe](#1-register-and-observe-a-folder).
+- **Check a downloaded weight before using it:** [verify a restored artifact](#verify-a-restored-artifact-independently-windowslinux-read-only).
+- **Understand what still needs building:** [architecture](docs/ARCHITECTURE.md), [qualification](docs/QUALIFICATION.md), and [product milestones](docs/PRODUCT_VISION.md).
+
+The goal is to make storage understandable and recoverable. A developer workstation should not have to permanently retain every model or training checkpoint, but OCD cannot infer that a local copy is disposable merely because another upload exists.
 
 ## The experience we're building
 
@@ -18,6 +25,8 @@ The goal is straightforward: files should have a home, storage should be underst
 
 For machine-learning workflows, the target architecture keeps **code, manifests, checksums, and retrieval instructions in Git**, large weights in an artifact/model store, and lets compute workers fetch only verified model files needed by a job. A developer workstation should not be the permanent model archive. This is the **intended workflow, not an existing OCD cloud-sync feature**.
 
+For the current private BT2 artifact releases, **uploaded is not restored**: the releases are still drafts, and GitHub only lists draft releases to accounts with push access. Do not give a read-only worker write credentials or evict the last Lappy copy. The private releases must first be authorized for publication without changing the repository's private visibility; then an independently authenticated worker must download, checksum, and successfully load each needed model. See [GitHub's release-access documentation](https://docs.github.com/en/rest/releases/releases).
+
 ### What works today
 
 | Capability | Developer-preview status |
@@ -27,6 +36,8 @@ For machine-learning workflows, the target architecture keeps **code, manifests,
 | Continuously observe changes | `watch` polls in the foreground and **reports only** |
 | Find exact-content duplicate candidates | `duplicates` reads sizes and SHA-256; no deletion |
 | Inspect bounded disk usage and largest files | `usage --path ABSOLUTE_DIR` reports logical sizes, top-level groups, optional POSIX allocation estimate, JSON, and an opt-in **static offline HTML treemap**; scanner is read-only, and HTML creation writes only the explicitly named new report file |
+| Bound tagged-folder traversal before a future durable observer | `ScanBudget` is an opt-in Python scanner API with entry/directory/depth/time limits and fail-closed detected replacements; **not** an installed observer or a new CLI option |
+| Build and install a Windows/Linux Python wheel | CI builds a wheel, installs it outside the source tree, and verifies both CLI entry points on Python 3.12/3.13; **not** a native installer |
 | Review large-file cleanup observations | `cleanup review --path ABSOLUTE_DIR` lists large-file observations as **blocked** until independent retention/restore/live-use evidence and separate authorization exist; no deletion or reclaimable-byte claim |
 | Move tagged local files | Explicit `apply --yes` on **Linux only**, journaled and no-overwrite; not production-qualified |
 | Fetch a known remote artifact | Explicit manifest-based, size + SHA-256 verified download; Linux source-tested; experimental Windows publication **disabled by default** pending native qualification; not sync |
