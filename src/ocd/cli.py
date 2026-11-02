@@ -60,8 +60,11 @@ def _parser() -> argparse.ArgumentParser:
                        help="maximum directory depth from root (default: 32)")
     usage.add_argument("--top", type=int, default=20,
                        help="maximum largest files and top-level groups to show (default: 20)")
-    usage.add_argument("--json", action="store_true",
-                       help="print a machine-readable report, including completeness")
+    formats = usage.add_mutually_exclusive_group()
+    formats.add_argument("--json", action="store_true",
+                         help="print a machine-readable report, including completeness")
+    formats.add_argument("--html", type=Path, metavar="ABSOLUTE_OUTPUT_FILE",
+                         help="create a self-contained, no-overwrite HTML treemap outside the scan root")
 
     cleanup = commands.add_parser(
         "cleanup", help="review large-file observations; never delete or claim reclaimable bytes"
@@ -290,7 +293,14 @@ def main(argv: list[str] | None = None) -> int:
                 args.path, max_entries=args.max_entries,
                 top=args.top, max_depth=args.max_depth,
             )
-            if args.json:
+            if args.html is not None:
+                from .treemap import write_usage_html
+
+                write_usage_html(report, args.html)
+                print(f"HTML REPORT {args.html!s}: "
+                      f"{'complete' if report.complete else 'INCOMPLETE'}; "
+                      "logical bytes only; no deletion or reclaimability claim")
+            elif args.json:
                 import json
 
                 def as_item(item):
