@@ -48,6 +48,8 @@ def _parser() -> argparse.ArgumentParser:
                             help="maximum eligible files to inspect (default: 100000)")
     duplicates.add_argument("--max-entries", type=int, default=200_000,
                             help="maximum filesystem entries visited (default: 200000)")
+    duplicates.add_argument("--json", action="store_true",
+                            help="complete machine-readable review evidence; no deletion permission")
 
     usage = commands.add_parser(
         "usage", help="bounded read-only disk usage by explicitly chosen directory; no cleanup"
@@ -434,6 +436,40 @@ def main(argv: list[str] | None = None) -> int:
             from .duplicates import scan_duplicates
 
             report = scan_duplicates(roots, max_files=args.max_files, max_entries=args.max_entries)
+            if args.json:
+                import json
+
+                # This is a review snapshot, not an executable removal list.
+                # Emit only after scan succeeds; failed budgets never produce a
+                # deceptively complete partial JSON report.
+                print(json.dumps({
+                    "schema_version": 1,
+                    "complete": not bool(report.skipped_unstable),
+                    "roots": [str(root.source) for root in roots],
+                    "groups": [{
+                        "sha256": group.sha256,
+                        "size": group.size,
+                        "logical_duplicate_bytes": group.logical_duplicate_bytes,
+                        "potential_reclaim_bytes_estimate": group.potential_reclaim_bytes,
+                        "files": [{
+                            "path": str(item.path),
+                            "size": item.size,
+                            "mtime_ns": item.mtime_ns,
+                            "device": item.device,
+                            "inode": item.inode,
+                            "link_count": item.link_count,
+                        } for item in group.files],
+                    } for group in report.groups],
+                    "files_scanned": report.files_scanned,
+                    "files_hashed": report.files_hashed,
+                    "skipped_hardlinks": report.skipped_hardlinks,
+                    "skipped_unstable": [str(path) for path in report.skipped_unstable],
+                    "logical_duplicate_bytes": report.logical_duplicate_bytes,
+                    "potential_reclaim_bytes_estimate": report.potential_reclaim_bytes,
+                    "deletion_eligible": False,
+                    "reclaimable_bytes": None,
+                }, sort_keys=True))
+                return 0 if not report.skipped_unstable else 1
             for group in report.groups:
                 print(f"DUPLICATE size={group.size} sha256={group.sha256} "
                       f"({len(group.files)} distinct file(s))")
