@@ -39,6 +39,14 @@ def _parser() -> argparse.ArgumentParser:
     watch.add_argument("--root", type=Path, help="registered source path (default: all roots)")
     watch.add_argument("--interval", type=float, default=1.0, metavar="SECONDS",
                        help="positive polling interval in seconds (default: 1)")
+    watch.add_argument("--max-entries", type=int, default=20_000,
+                       help="maximum filesystem entries per root per poll (default: 20000)")
+    watch.add_argument("--max-directories", type=int, default=4_000,
+                       help="maximum directories per root per poll (default: 4000)")
+    watch.add_argument("--max-depth", type=int, default=24,
+                       help="maximum traversal depth per root per poll (default: 24)")
+    watch.add_argument("--max-seconds", type=float, default=10.0,
+                       help="cooperative per-root scan deadline (default: 10 seconds)")
 
     duplicates = commands.add_parser(
         "duplicates", help="find exact-content duplicate candidates; never change or delete files"
@@ -489,13 +497,20 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "watch":
             from threading import Event, TIMEOUT_MAX
             from .monitor import watch_roots
+            from .scanner import ScanBudget
 
             if math.isfinite(args.interval) and args.interval > TIMEOUT_MAX:
                 raise ConfigError(f"--interval cannot exceed {TIMEOUT_MAX:g} seconds")
+            scan_budget = ScanBudget(
+                max_entries=args.max_entries,
+                max_directories=args.max_directories,
+                max_depth=args.max_depth,
+                max_seconds=args.max_seconds,
+            )
             stop_event = Event()
             try:
                 watch_roots(roots, _display_watch_event, stop_event=stop_event,
-                            interval_seconds=args.interval)
+                            interval_seconds=args.interval, scan_budget=scan_budget)
             except KeyboardInterrupt:
                 stop_event.set()
                 print("Watch stopped; no changes made")

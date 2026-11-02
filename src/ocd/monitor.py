@@ -14,7 +14,7 @@ from typing import Callable, Iterable, Literal
 
 from .config import verified_root
 from .planner import build_plan
-from .scanner import scan_root
+from .scanner import ScanBudget, scan_root
 from .types import FileEntry, PlanResult, RootConfig
 
 
@@ -43,6 +43,7 @@ def watch_roots(
     stop_event: Event,
     interval_seconds: float = 1.0,
     max_polls: int | None = None,
+    scan_budget: ScanBudget | None = None,
 ) -> None:
     """Poll registered roots until stopped or ``max_polls`` rounds complete.
 
@@ -57,6 +58,9 @@ def watch_roots(
     error events; a successful recovery emits a new change event. Exceptions
     from the caller's callback intentionally propagate so reports are not
     silently lost. ``max_polls`` is useful for deterministic bounded tests.
+    When supplied, ``scan_budget`` prevents an incomplete scan from appearing
+    as a change event. Budget failures are recoverable per-root error events;
+    a subsequent successful scan emits a complete change observation.
     """
     selected = tuple(roots)
     if not selected:
@@ -79,6 +83,8 @@ def watch_roots(
         isinstance(max_polls, bool) or not isinstance(max_polls, int) or max_polls < 1
     ):
         raise ValueError("max_polls must be a positive integer or None")
+    if scan_budget is not None and not isinstance(scan_budget, ScanBudget):
+        raise TypeError("scan_budget must be a ScanBudget or None")
 
     # Keep state by position, because RootConfig contains an unhashable dict.
     previous: list[tuple[tuple[FileEntry, ...], PlanResult] | None] = [None] * len(selected)
@@ -90,7 +96,8 @@ def watch_roots(
                 break
             try:
                 verified_root(root)
-                files = scan_root(root)
+                files = (scan_root(root) if scan_budget is None
+                         else scan_root(root, budget=scan_budget))
                 plan = build_plan(root, files)
             except (OSError, RuntimeError, ValueError, TypeError) as exc:
                 signature = (type(exc), str(exc))

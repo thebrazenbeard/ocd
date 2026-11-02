@@ -36,7 +36,7 @@ For the current private BT2 artifact releases, **uploaded is not restored**: the
 | Continuously observe changes | `watch` polls in the foreground and **reports only** |
 | Find exact-content duplicate candidates | `duplicates` reads sizes and SHA-256; no deletion |
 | Inspect bounded disk usage and largest files | `usage --path ABSOLUTE_DIR` reports logical sizes, top-level groups, optional POSIX allocation estimate, JSON, and an opt-in **static offline HTML treemap**; scanner is read-only, and HTML creation writes only the explicitly named new report file |
-| Bound tagged-folder traversal before a future durable observer | `ScanBudget` is an opt-in Python scanner API with entry/directory/depth/time limits and fail-closed detected replacements; **not** an installed observer or a new CLI option |
+| Bound tagged-folder traversal before a future durable observer | `ScanBudget` limits entries/directories/depth/cooperative time; the foreground `watch` CLI applies those limits on every poll by default, and `monitor.watch_roots` accepts an optional API budget. This is **not** an installed durable observer. |
 | Build and install a Windows/Linux Python wheel | CI builds a wheel, installs it outside the source tree, and verifies both CLI entry points on Python 3.12/3.13; **not** a native installer |
 | Review large-file cleanup observations | `cleanup review --path ABSOLUTE_DIR` lists large-file observations as **blocked** until independent retention/restore/live-use evidence and separate authorization exist; no deletion or reclaimable-byte claim |
 | Move tagged local files | Explicit `apply --yes` on **Linux only**, journaled and no-overwrite; not production-qualified |
@@ -82,10 +82,10 @@ ocd --config ./ocd.json roots add "$HOME/OCD-Inbox" "$HOME/OCD-Sorted" \
 ocd --config ./ocd.json roots list
 ocd --config ./ocd.json scan
 ocd --config ./ocd.json plan
-ocd --config ./ocd.json watch --interval 2
+ocd --config ./ocd.json watch --interval 2 --max-entries 20000 --max-directories 4000 --max-depth 24 --max-seconds 10
 ```
 
-`watch` stays in the foreground and prints fresh plans when observations change. Stop it with Ctrl+C. **It never applies those plans**, even if a root was registered in `apply` mode.
+`watch` stays in the foreground and prints fresh plans when observations change. Its per-root scan budgets are fail-closed: exhaustion prints a coalesced error without publishing a partial change, and a later complete scan emits a recovery change; other registered roots continue. The time budget is cooperative and cannot interrupt a blocked filesystem syscall. Stop with Ctrl+C. **It never applies those plans**, even if a root was registered in `apply` mode.
 
 On Windows PowerShell, read-only registration and planning use the same commands with Windows paths:
 

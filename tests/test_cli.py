@@ -185,10 +185,14 @@ class CliTests(unittest.TestCase):
         move = MovePlan(self.source / "a.txt", self.destination / "documents" / "a.txt", "documents", 1, 0)
         from ocd.monitor import MonitorEvent
 
-        def watch(selected, callback, *, stop_event, interval_seconds):
+        def watch(selected, callback, *, stop_event, interval_seconds, scan_budget):
             self.assertEqual(len(selected), 1)
             self.assertEqual(selected[0].source, self.source)
             self.assertEqual(interval_seconds, 0.2)
+            self.assertEqual(scan_budget.max_entries, 20_000)
+            self.assertEqual(scan_budget.max_directories, 4_000)
+            self.assertEqual(scan_budget.max_depth, 24)
+            self.assertEqual(scan_budget.max_seconds, 10.0)
             self.assertFalse(stop_event.is_set())
             callback(MonitorEvent(selected[0], "change", plan=PlanResult((move,), ())))
             callback(MonitorEvent(selected[0], "error", error="PermissionError: read denied"))
@@ -222,6 +226,60 @@ class CliTests(unittest.TestCase):
         self.assertIn("--interval", error)
         self.assertFalse((self.config.parent / "journal.jsonl").exists())
 
+    def test_watch_budget_flags_are_validated_and_forwarded(self):
+        self.initialize()
+        self.register(mode="apply")
+        from ocd.monitor import MonitorEvent
+
+        def one_poll(roots, callback, *, stop_event, interval_seconds, scan_budget):
+            self.assertEqual(len(roots), 1)
+            self.assertEqual(scan_budget.max_entries, 1)
+            self.assertEqual(scan_budget.max_directories, 2)
+            self.assertEqual(scan_budget.max_depth, 0)
+            self.assertEqual(scan_budget.max_seconds, 0.5)
+            callback(MonitorEvent(roots[0], "error", error="ScanBudgetExceeded: incomplete"))
+
+        with patch("ocd.monitor.watch_roots", side_effect=one_poll), patch(
+            "ocd.apply.apply_moves", side_effect=AssertionError("watch attempted mutation")
+        ):
+            status, output, error = self.invoke(
+                "watch", "--max-entries", "1", "--max-directories", "2",
+                "--max-depth", "0", "--max-seconds", "0.5")
+        self.assertEqual(status, 0, error)
+        self.assertIn("ScanBudgetExceeded", error)
+        self.assertFalse((self.config.parent / "journal.jsonl").exists())
+
+        for args in (("--max-entries", "0"), ("--max-directories", "-1"),
+                     ("--max-depth", "-1"), ("--max-seconds", "nan"),
+                     ("--max-seconds", "0")):
+            with self.subTest(args=args):
+                code, _, stderr = self.invoke("watch", *args)
+                self.assertEqual(code, 2, stderr)
+                self.assertIn("must be", stderr)
+
+    def test_watch_budget_exhaustion_never_prints_partial_change(self):
+        self.initialize()
+        self.register(mode="apply")
+        (self.source / "one.jpg").write_bytes(b"old one")
+        (self.source / "two.jpg").write_bytes(b"old two")
+        from ocd.monitor import watch_roots as actual_watch_roots
+
+        def one_poll(roots, callback, *, stop_event, interval_seconds, scan_budget):
+            return actual_watch_roots(roots, callback, stop_event=stop_event,
+                                      interval_seconds=interval_seconds, max_polls=1,
+                                      scan_budget=scan_budget)
+
+        with patch("ocd.monitor.watch_roots", side_effect=one_poll), patch(
+            "ocd.apply.apply_moves", side_effect=AssertionError("watch attempted mutation")
+        ):
+            status, output, error = self.invoke("watch", "--max-entries", "1")
+        self.assertEqual(status, 0, error)
+        self.assertIn("ScanBudgetExceeded", error)
+        self.assertNotIn("WATCH ", output)
+        self.assertTrue((self.source / "one.jpg").exists())
+        self.assertTrue((self.source / "two.jpg").exists())
+        self.assertFalse((self.config.parent / "journal.jsonl").exists())
+
     def test_watch_reports_root_failure_without_disabling_other_roots(self):
         self.initialize()
         self.register()
@@ -234,9 +292,10 @@ class CliTests(unittest.TestCase):
         self.source.rename(self.base / "disconnected-incoming")
         from ocd.monitor import watch_roots as actual_watch_roots
 
-        def one_poll(roots, callback, *, stop_event, interval_seconds):
+        def one_poll(roots, callback, *, stop_event, interval_seconds, scan_budget):
             return actual_watch_roots(roots, callback, stop_event=stop_event,
-                                      interval_seconds=interval_seconds, max_polls=1)
+                                      interval_seconds=interval_seconds, max_polls=1,
+                                      scan_budget=scan_budget)
 
         with patch("ocd.monitor.watch_roots", side_effect=one_poll):
             status, output, error = self.invoke("watch")
