@@ -34,7 +34,11 @@ class ScanBudgetExceeded(RuntimeError):
 
 @dataclass(frozen=True)
 class ScanBudget:
-    """Explicit limits for a durable monitor's source traversal."""
+    """Explicit traversal limits; elapsed time is a cooperative deadline.
+
+    The deadline is checked between operations. A slow filesystem syscall
+    cannot be interrupted by this scanner, so wall time can exceed max_seconds.
+    """
 
     max_entries: int = 20_000
     max_directories: int = 4_000
@@ -247,28 +251,35 @@ def _scan_with_directory_fds(
 
 
 def _scan_by_path(
-    source: Path, destination: Path, cutoff_ns: int,
+    source: Path, source_details: os.stat_result, destination: Path, cutoff_ns: int,
     tracker: _ScanTracker | None = None,
 ) -> list[FileEntry]:
     """Windows fallback: validate paths before and immediately after opening.
 
-    Windows os.scandir does not support directory descriptors. Rechecking
-    identity and every ancestor prevents simple swaps, but malicious repeated
-    replacements cannot be made atomic through this standard-library API.
+    Windows os.scandir does not support directory descriptors. Remembering
+    queued directory identities and rechecking each ancestor prevents ordinary
+    replacements, but malicious repeated swaps cannot be made atomic through
+    this standard-library API.
     """
     discovered: list[FileEntry] = []
-    pending = [(source, 0)]
+    # Retain the identity observed when each directory was queued. Path-only
+    # fallback must not substitute a different ordinary directory at that path.
+    pending = [(source, _file_identity(source_details), 0)]
     while pending:
-        directory, depth = pending.pop()
+        directory, expected_identity, depth = pending.pop()
         if not _check_directory(directory, source):
             if tracker is not None:
                 raise ScanBudgetExceeded("queued directory disappeared or changed; observation incomplete")
             continue
-        if tracker is not None:
-            tracker.directory(depth)
         before = directory.lstat()
+        if tracker is not None:
+            if _file_identity(before) != expected_identity:
+                raise ScanBudgetExceeded("queued directory changed identity; observation incomplete")
+            tracker.directory(depth)
         with os.scandir(directory) as children:
             if not _check_directory(directory, source) or not _same_file(before, directory.lstat()):
+                if tracker is not None:
+                    raise ScanBudgetExceeded("queued directory changed during scan; observation incomplete")
                 raise ValueError(f"Directory changed during scan: {directory}")
             for child in children:
                 if tracker is not None:
@@ -288,7 +299,23 @@ def _scan_by_path(
                 if stat.S_ISDIR(details.st_mode):
                     if tracker is not None and depth + 1 > tracker.budget.max_depth:
                         raise ScanBudgetExceeded("scan depth budget exceeded; observation incomplete")
-                    pending.append((path, depth + 1))
+                    expected_child_identity = None
+                    if tracker is not None:
+                        # On Windows, DirEntry.stat may report (st_dev, st_ino)
+                        # as (0, 0). Take a separate lstat for a real identity,
+                        # and reject links/non-directories before queuing.
+                        try:
+                            queued_details = path.lstat()
+                        except FileNotFoundError as exc:
+                            raise ScanBudgetExceeded(
+                                "queued directory disappeared before admission; observation incomplete"
+                            ) from exc
+                        if _is_link(queued_details) or not stat.S_ISDIR(queued_details.st_mode):
+                            raise ScanBudgetExceeded(
+                                "queued directory changed before admission; observation incomplete"
+                            )
+                        expected_child_identity = _file_identity(queued_details)
+                    pending.append((path, expected_child_identity, depth + 1))
                 elif stat.S_ISREG(details.st_mode) and details.st_mtime_ns <= cutoff_ns:
                     discovered.append(FileEntry(path=path, size=details.st_size, mtime_ns=details.st_mtime_ns))
 
@@ -355,7 +382,7 @@ def scan_root(root: RootConfig, *, budget: ScanBudget | None = None) -> tuple[Fi
     if _CAN_SCAN_FD:
         discovered = _scan_with_directory_fds(source, source_details, destination, cutoff_ns, tracker)
     else:
-        discovered = _scan_by_path(source, destination, cutoff_ns, tracker)
+        discovered = _scan_by_path(source, source_details, destination, cutoff_ns, tracker)
 
     if tracker is not None:
         tracker._time()

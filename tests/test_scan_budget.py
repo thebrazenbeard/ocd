@@ -86,6 +86,50 @@ class BoundedScannerTests(unittest.TestCase):
             # The unbudgeted one-shot scanner still skips a vanished descendant.
             self.assertEqual(scan_root(self.root), ())
 
+    def test_real_queued_directory_swap_in_windows_path_fallback_fails_closed(self):
+        nested = self.src / "nested"
+        former = self.src / "former-nested"
+        nested.mkdir()
+        (nested / "original.txt").write_text("original")
+        original_check = scanner._check_directory
+        swapped = False
+
+        def replace_when_queued(path, source):
+            nonlocal swapped
+            if path == nested and not swapped:
+                nested.rename(former)
+                nested.mkdir()
+                (nested / "impostor.txt").write_text("impostor")
+                swapped = True
+            return original_check(path, source)
+
+        with mock.patch("ocd.scanner._CAN_SCAN_FD", False), \
+             mock.patch("ocd.scanner._check_directory", side_effect=replace_when_queued):
+            with self.assertRaisesRegex(ScanBudgetExceeded, "changed identity"):
+                scan_root(self.root, budget=ScanBudget())
+        self.assertTrue(swapped)
+
+    def test_source_root_swap_after_admission_fails_closed(self):
+        former = self.base / "former-source"
+        (self.src / "original.txt").write_text("original")
+        original_check = scanner._check_directory
+        swapped = False
+
+        def replace_root_after_admission(path, source):
+            nonlocal swapped
+            if path == self.src and not swapped:
+                self.src.rename(former)
+                self.src.mkdir()
+                (self.src / "impostor.txt").write_text("impostor")
+                swapped = True
+            return original_check(path, source)
+
+        with mock.patch("ocd.scanner._CAN_SCAN_FD", False), \
+             mock.patch("ocd.scanner._check_directory", side_effect=replace_root_after_admission):
+            with self.assertRaisesRegex(ScanBudgetExceeded, "changed identity"):
+                scan_root(self.root, budget=ScanBudget())
+        self.assertTrue(swapped)
+
     def test_entry_disappearance_in_path_fallback_fails_closed(self):
         vanished = mock.Mock()
         vanished.stat.side_effect = FileNotFoundError("gone")
