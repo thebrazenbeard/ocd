@@ -41,7 +41,7 @@ _FILE_SHARE_WRITE = 2
 _OPEN_EXISTING = 3
 _FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
 _FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
-_FILE_RENAME_INFO_CLASS = 3
+_NT_FILE_RENAME_INFORMATION_CLASS = 10
 _FILE_BASIC_INFO_CLASS = 0
 _FILE_STANDARD_INFO_CLASS = 1
 _FILE_ATTRIBUTE_TAG_INFO_CLASS = 9
@@ -166,7 +166,7 @@ def rename_noreplace(
 ) -> None:
     """Rename one validated file under locked directory handles.
 
-    Success means FileRenameInfo with ReplaceIfExists=FALSE succeeded.  An
+    Success means native FileRenameInformation with ReplaceIfExists=FALSE succeeded. An
     existing *different* file is not replaced according to Microsoft's API
     contract.  An existing hardlink to the *same* file is a special case in
     the underlying MS-FSA algorithm; do not enable apply before qualifying
@@ -249,9 +249,9 @@ class _FILE_ID_INFO(ctypes.Structure):
 
 
 class _FILE_RENAME_INFO(ctypes.Structure):
-    # DWORD (not BOOLEAN) at offset zero, HANDLE pointer-aligned; WCHAR is
-    # always 16-bit on Windows.  Explicit fixed-width fields also permit ABI
-    # tests on Linux where ctypes.wintypes.DWORD/WCHAR differ in size.
+    # Native FILE_RENAME_INFORMATION stores BOOLEAN + padding; zeroed DWORD
+    # followed by pointer alignment is ABI-compatible. WCHAR is UTF-16,
+    # including for portable ABI tests on Linux.
     _fields_ = [
         ("ReplaceIfExists", ctypes.c_uint32),
         ("RootDirectory", ctypes.c_void_p),
@@ -260,15 +260,21 @@ class _FILE_RENAME_INFO(ctypes.Structure):
     ]
 
 
+class _IO_STATUS_BLOCK(ctypes.Structure):
+    # Native status/pointer union and Information are pointer-sized.
+    _fields_ = [
+        ("Status", ctypes.c_size_t),
+        ("Information", ctypes.c_size_t),
+    ]
+
+
 def _rename_buffer(directory_handle: object, leaf: str) -> tuple[ctypes.Array, int]:
     name = leaf.encode("utf-16le", "surrogatepass")
     offset = _FILE_RENAME_INFO.FileName.offset
     # Include the harmless terminating UTF-16 NUL, although the API does not
     # require it or include it in FileNameLength.
-    # NTIFS FILE_RENAME_INFORMATION requires at least sizeof(struct) PLUS
-    # FileNameLength bytes.  The trailing WCHAR[1] is included in sizeof;
-    # allocating only offset + name bytes can yield ERROR_INVALID_PARAMETER
-    # (87) on Windows even though every visible field has been initialized.
+    # Native FILE_RENAME_INFORMATION requires sizeof(struct) plus the UTF-16
+    # bytes; the trailing WCHAR[1] already contributes to sizeof.
     count = ctypes.sizeof(_FILE_RENAME_INFO) + len(name)
     buffer = ctypes.create_string_buffer(count)
     header = ctypes.cast(buffer, ctypes.POINTER(_FILE_RENAME_INFO)).contents
@@ -321,6 +327,15 @@ class _Win32Api:
                 ctypes.POINTER(ctypes.c_uint32), ctypes.c_wchar_p, ctypes.c_uint32,
             ]
             self._volume.restype = ctypes.c_int
+            # Native FileRenameInformation retains the held RootDirectory.
+            # Win32 FileRenameInfo rejected this relative form (WinError 87).
+            native = ctypes.WinDLL("ntdll", use_last_error=True)
+            self._nt_set = native.NtSetInformationFile
+            self._nt_set.argtypes = [
+                ctypes.c_void_p, ctypes.POINTER(_IO_STATUS_BLOCK),
+                ctypes.c_void_p, ctypes.c_uint32, ctypes.c_int,
+            ]
+            self._nt_set.restype = ctypes.c_int32
         except (AttributeError, OSError) as exc:
             raise UnsafeWindowsMove(f"required Win32 APIs unavailable: {exc}") from exc
 
@@ -391,11 +406,18 @@ class _Win32Api:
 
     def rename(self, source: object, destination_parent: object, leaf: str) -> None:
         buffer, length = _rename_buffer(destination_parent, leaf)
-        if not self._set(source, _FILE_RENAME_INFO_CLASS, buffer, length):
-            # Preserve the exact failing Win32 operation for native CI. A
-            # generic WinError 87 otherwise gives no clue whether the rename
-            # buffer or an unrelated handle operation was rejected.
-            raise UnsafeWindowsMove(f"FileRenameInfo no-replace rename failed: {self._win_error()}")
+        status_block = _IO_STATUS_BLOCK()
+        status = self._nt_set(
+            source, ctypes.byref(status_block), buffer, length,
+            _NT_FILE_RENAME_INFORMATION_CLASS,
+        )
+        if status != 0 or status_block.Status != 0:
+            # Never retry with an unanchored absolute-path fallback.
+            raise UnsafeWindowsMove(
+                "NtSetInformationFile anchored no-replace rename failed: "
+                f"NTSTATUS 0x{status & 0xFFFFFFFF:08X}, "
+                f"IO_STATUS 0x{status_block.Status & 0xFFFFFFFF:08X}"
+            )
 
     def close(self, handle: object) -> None:
         if not self._close(handle):
