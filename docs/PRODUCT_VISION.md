@@ -10,7 +10,7 @@ The existing Python implementation is a **local developer-preview foundation**:
 
 - Versioned local JSON configuration with explicitly registered roots.
 - Local scanner and deterministic move planner with explicit folder-ancestor and extension tags.
-- Observe-only foreground polling monitor and read-only SHA-256 duplicate reports.
+- Observe-only foreground polling monitor, read-only SHA-256 duplicate reports, and bounded config-free disk-usage reports.
 - Deliberate Linux same-filesystem moves with source rechecks, no-overwrite behavior, journaling, and rollback attempts.
 - Explicit manifest-based, size/hash-checked artifact **download** with source-level POSIX and experimental native Windows publication; Windows host qualification remains outstanding.
 - Explicit content-addressed local artifact cache with verified import/materialization; not a cloud account, upload, or remote sync service.
@@ -67,7 +67,8 @@ Organizing a cloud location is not equivalent to downloading one HTTPS URL; trea
 - [x] Add a polling observer and exact-content duplicate reporting without deletion.
 - [x] Add a Linux-only explicit local move implementation, artifact retrieval, and a content-addressed local cache on POSIX; add experimental Windows download publication for native qualification.
 - [x] Document Windows fail-closed state and add multi-platform source CI.
-- [ ] Land the rebuilt code and documentation in the repository, observe passing CI, and attach reproducible qualification records.
+- [x] Land the rebuilt developer-preview code and documentation; PR [#4](https://github.com/thebrazenbeard/ocd/pull/4) merged as `a4be396579649c4ce0d126004772f2846bd7c5f2` after passing Windows/Linux source CI and startup-safety checks.
+- [ ] Complete reproducible native host qualification (especially NTFS/ReFS mutation and recovery), beyond the limited read-only `usage` smoke record.
 - [ ] Resolve security review findings and harden cancellation/recovery for hostile filesystems.
 
 ### M1 — Real, monitored Windows/Linux local organizer
