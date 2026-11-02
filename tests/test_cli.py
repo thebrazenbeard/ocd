@@ -270,6 +270,70 @@ class CliTests(unittest.TestCase):
         self.assertEqual(second.read_bytes(), payload)
         self.assertFalse((self.config.parent / "journal.jsonl").exists())
 
+    def test_duplicates_json_is_deterministic_review_evidence_not_deletion_permission(self):
+        self.initialize()
+        self.register(mode="apply")
+        first = self.source / "one.bin"
+        second = self.source / "two.bin"
+        first.write_bytes(b"model-shard")
+        second.write_bytes(b"model-shard")
+
+        with patch("ocd.apply.apply_moves", side_effect=AssertionError("duplicate report called apply")):
+            first_run = self.invoke("duplicates", "--json")
+            second_run = self.invoke("duplicates", "--json")
+        self.assertEqual(first_run[0], 0, first_run[2])
+        self.assertEqual(first_run[1], second_run[1])
+        report = json.loads(first_run[1])
+        self.assertEqual(report["schema_version"], 1)
+        self.assertTrue(report["complete"])
+        self.assertFalse(report["deletion_eligible"])
+        self.assertIsNone(report["reclaimable_bytes"])
+        self.assertEqual(report["logical_duplicate_bytes"], len(b"model-shard"))
+        self.assertEqual(report["potential_reclaim_bytes_estimate"], len(b"model-shard"))
+        self.assertEqual(report["skipped_unstable"], [])
+        self.assertEqual(report["files_scanned"], 2)
+        self.assertEqual(report["files_hashed"], 2)
+        self.assertEqual(len(report["groups"]), 1)
+        group = report["groups"][0]
+        self.assertEqual(group["sha256"], hashlib.sha256(b"model-shard").hexdigest())
+        self.assertEqual(group["files"], [
+            {"path": str(first), "size": len(b"model-shard"),
+             "mtime_ns": first.stat().st_mtime_ns, "device": first.stat().st_dev,
+             "inode": first.stat().st_ino, "link_count": first.stat().st_nlink},
+            {"path": str(second), "size": len(b"model-shard"),
+             "mtime_ns": second.stat().st_mtime_ns, "device": second.stat().st_dev,
+             "inode": second.stat().st_ino, "link_count": second.stat().st_nlink},
+        ])
+        self.assertTrue(first.exists() and second.exists())
+        self.assertFalse((self.config.parent / "journal.jsonl").exists())
+
+    def test_duplicates_json_invalid_budget_has_no_partial_report(self):
+        self.initialize()
+        self.register()
+        (self.source / "a").write_bytes(b"same")
+        (self.source / "b").write_bytes(b"same")
+        status, output, error = self.invoke("duplicates", "--json", "--max-files", "1")
+        self.assertEqual(status, 2)
+        self.assertEqual(output, "")
+        self.assertIn("max_files", error)
+        self.assertFalse((self.config.parent / "journal.jsonl").exists())
+
+    def test_duplicates_json_does_not_mark_unstable_skips_complete(self):
+        from ocd.duplicates import DuplicateReport
+
+        self.initialize()
+        self.register()
+        skipped = self.source / "changed.bin"
+        partial = DuplicateReport((), 2, 1, 0, (skipped,), 0, 0)
+        with patch("ocd.duplicates.scan_duplicates", return_value=partial):
+            status, output, error = self.invoke("duplicates", "--json")
+        self.assertEqual(status, 1, error)
+        data = json.loads(output)
+        self.assertFalse(data["complete"])
+        self.assertEqual(data["skipped_unstable"], [str(skipped)])
+        self.assertFalse(data["deletion_eligible"])
+        self.assertIsNone(data["reclaimable_bytes"])
+
     def test_duplicates_rejects_unregistered_roots_and_invalid_budgets(self):
         self.initialize()
         self.register()

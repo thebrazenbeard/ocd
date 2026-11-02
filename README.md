@@ -109,6 +109,8 @@ ocd --config ./ocd.json duplicates --max-files 10000 --max-entries 20000
 
 This compares exact-content SHA-256 hashes, skips hardlink aliases, and displays *estimated* reclaimable bytes. It does not delete or deduplicate files. Estimates may differ from actual disk space recovered because of compression, hardlinks, snapshots, and filesystem behavior.
 
+Add `--json` to print a deterministic, versioned, machine-readable review snapshot (including SHA-256, per-file identity and modification metadata, skipped unstable paths, and a scan-completeness flag). The JSON includes `"deletion_eligible": false` and `"reclaimable_bytes": null` regardless of possible duplicate bytes. A failed scan budget prints no partial report and returns nonzero; unstable skips mark the JSON incomplete and return status 1. Treat file identities and SHA-256 digests as a *past observation*, not a durable deletion authorization or a guarantee that the files are unchanged.
+
 ### Inspect disk usage (Windows/Linux, read-only)
 
 OCD can now inventory an **explicitly selected absolute directory or drive root** without organizer registration. This is a bounded, no-delete diagnostic, inspired by disk exploration in [MangoDisk](https://github.com/harry0703/MangoDisk), [WinDirStat](https://github.com/windirstat/windirstat), and [SquirrelDisk](https://github.com/adileo/squirreldisk). OCD does not incorporate those projects' code or invoke their applications.
