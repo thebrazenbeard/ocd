@@ -49,6 +49,20 @@ def _parser() -> argparse.ArgumentParser:
     duplicates.add_argument("--max-entries", type=int, default=200_000,
                             help="maximum filesystem entries visited (default: 200000)")
 
+    usage = commands.add_parser(
+        "usage", help="bounded read-only disk usage by explicitly chosen directory; no cleanup"
+    )
+    usage.add_argument("--path", type=Path, required=True,
+                       help="absolute existing directory or drive root to measure")
+    usage.add_argument("--max-entries", type=int, default=100_000,
+                       help="maximum entries processed (one lookahead detects overflow; default: 100000)")
+    usage.add_argument("--max-depth", type=int, default=32,
+                       help="maximum directory depth from root (default: 32)")
+    usage.add_argument("--top", type=int, default=20,
+                       help="maximum largest files and top-level groups to show (default: 20)")
+    usage.add_argument("--json", action="store_true",
+                       help="print a machine-readable report, including completeness")
+
     apply = commands.add_parser("apply", help="replan and execute allowed moves (never delete)")
     apply.add_argument("--root", type=Path, required=True, help="registered source path")
     apply.add_argument("--yes", action="store_true", help="required consent to execute moves")
@@ -198,6 +212,59 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"ocd: cache {args.cache_command} failed: {exc}", file=sys.stderr)
                 return 1
             return 0
+
+        if args.command == "usage":
+            # Standalone explicit read-only discovery; never loads organizer
+            # config, invokes apply, or treats logical bytes as reclaimable.
+            from .usage import scan_usage
+
+            report = scan_usage(
+                args.path, max_entries=args.max_entries,
+                top=args.top, max_depth=args.max_depth,
+            )
+            if args.json:
+                import json
+
+                def as_item(item):
+                    return {
+                        "path": str(item.path),
+                        "logical_bytes": item.logical_bytes,
+                        "allocated_bytes": item.allocated_bytes,
+                    }
+
+                print(json.dumps({
+                    "root": str(report.root),
+                    "complete": report.complete,
+                    "entries_visited": report.entries_visited,
+                    "files": report.files,
+                    "directories": report.directories,
+                    "skipped_links": report.skipped_links,
+                    "skipped_special": report.skipped_special,
+                    "logical_bytes": report.logical_bytes,
+                    "allocated_bytes": report.allocated_bytes,
+                    "largest_files": [as_item(item) for item in report.largest_files],
+                    "largest_children": [as_item(item) for item in report.largest_children],
+                    "issues": list(report.issues),
+                }, sort_keys=True))
+            else:
+                estimate = (
+                    str(report.allocated_bytes) if report.allocated_bytes is not None
+                    else "unknown"
+                )
+                print(f"USAGE {str(report.root)!r}: {report.logical_bytes} logical bytes, "
+                      f"{estimate} estimated allocated bytes, {report.files} file(s), "
+                      f"{report.directories} directory/ies, {report.entries_visited} entries")
+                for item in report.largest_children:
+                    print(f"GROUP {item.logical_bytes} logical bytes: {str(item.path)!r}")
+                for item in report.largest_files:
+                    print(f"FILE {item.logical_bytes} logical bytes: {str(item.path)!r}")
+                for issue in report.issues:
+                    print(f"INCOMPLETE {issue!r}")
+                print(
+                    "Read-only snapshot; physical allocation is approximate or unknown. "
+                    "No deletion or reclaimable-space claim."
+                )
+            return 0 if report.complete else 1
 
         config = load_config(path)
         if args.command == "roots":
