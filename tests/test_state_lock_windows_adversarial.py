@@ -129,12 +129,15 @@ class WindowsStatePathAdversarialTests(unittest.TestCase):
 
         actual = state_lock._private_state_dir
         parked = self.parent / "parked-validated-state"
+        swapped = False
 
         def swap_after_validation(value: Path) -> Path:
+            nonlocal swapped
             validated = actual(value)
             validated.rename(parked)
             if not self._create_junction(validated, target):
                 self.fail("could not install disposable junction after validation")
+            swapped = True
             return validated
 
         try:
@@ -142,6 +145,7 @@ class WindowsStatePathAdversarialTests(unittest.TestCase):
                 with self.assertRaises(UnsafeStateDirectory):
                     with acquire_state_lock(self.state):
                         self.fail("junction swap escaped the validated state directory")
+            self.assertTrue(swapped, "fixture must actually replace a previously validated directory")
             self.assertEqual(marker.read_text(encoding="utf-8"), "unchanged")
             self.assertFalse((target / "observer.lock").exists(),
                              "lock file must never be created across a junction")

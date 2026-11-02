@@ -86,9 +86,11 @@ def _windows_check_private_acl(path: Path) -> None:
     """Read existing native NTFS/ReFS ownership/DACL; never rewrite an ACL.
 
     An untrusted principal may receive read/execute, but not any file-system
-    write/delete/ownership rights. The current token owner, LOCAL SYSTEM and
-    BUILTIN Administrators are the only allowed writable ACE trustees. This
-    cannot eliminate malicious same-user replacement or ancestor TOCTOU.
+    write/delete/ownership rights. TokenUser, LOCAL SYSTEM and BUILTIN
+    Administrators are trusted owners; Windows can assign an elevated token's
+    Administrators group as TokenOwner. OWNER RIGHTS refers to the validated
+    object owner, not another principal. This cannot eliminate same-user
+    replacement or ancestor TOCTOU.
     """
     import ctypes
     from ctypes import wintypes
@@ -147,12 +149,15 @@ def _windows_check_private_acl(path: Path) -> None:
 
         system_sid = ctypes.c_void_p()
         admin_sid = ctypes.c_void_p()
+        owner_rights_sid = ctypes.c_void_p()
         if not advapi.ConvertStringSidToSidW("S-1-5-18", ctypes.byref(system_sid)):
             raise ctypes.WinError(ctypes.get_last_error())
         try:
             if not advapi.ConvertStringSidToSidW("S-1-5-32-544", ctypes.byref(admin_sid)):
                 raise ctypes.WinError(ctypes.get_last_error())
             try:
+                if not advapi.ConvertStringSidToSidW("S-1-3-4", ctypes.byref(owner_rights_sid)):
+                    raise ctypes.WinError(ctypes.get_last_error())
                 owner = ctypes.c_void_p()
                 dacl = ctypes.c_void_p()
                 descriptor = ctypes.c_void_p()
@@ -164,8 +169,11 @@ def _windows_check_private_acl(path: Path) -> None:
                 if status:
                     raise OSError(status, f"cannot inspect Windows state DACL: {path}")
                 try:
-                    if (not owner.value or not dacl.value or
-                            not advapi.EqualSid(owner, user_sid)):
+                    owner_trusted = bool(owner.value) and any(
+                        advapi.EqualSid(owner, sid)
+                        for sid in (user_sid, system_sid, admin_sid)
+                    )
+                    if not owner_trusted or not dacl.value:
                         raise UnsafeStateDirectory(
                             f"Windows state owner or DACL is unsafe: {path}")
 
@@ -193,7 +201,7 @@ def _windows_check_private_acl(path: Path) -> None:
                         _windows_sid_length(ace_size, ctypes.string_at(ace.value + 8, 8))
                         trustee = ctypes.c_void_p(ace.value + 8)
                         trusted = any(advapi.EqualSid(trustee, sid) for sid in
-                                      (user_sid, system_sid, admin_sid))
+                                      (user_sid, system_sid, admin_sid, owner_rights_sid))
                         if _windows_untrusted_writable_ace(ace_type, mask, trusted):
                             raise UnsafeStateDirectory(
                                 f"Windows state has an untrusted writable ACE: {path}")
@@ -201,6 +209,8 @@ def _windows_check_private_acl(path: Path) -> None:
                     if descriptor.value:
                         kernel.LocalFree(descriptor)
             finally:
+                if owner_rights_sid.value:
+                    kernel.LocalFree(owner_rights_sid)
                 if admin_sid.value:
                     kernel.LocalFree(admin_sid)
         finally:
