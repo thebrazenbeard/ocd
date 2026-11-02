@@ -20,7 +20,17 @@ from ocd.state_lock import StateLockBusy, UnsafeStateDirectory, acquire_state_lo
 
 class StateLockTests(unittest.TestCase):
     def setUp(self) -> None:
-        temporary = tempfile.TemporaryDirectory(prefix="ocd-state-lock-")
+        # Hosted Windows runners can set TEMP to a workspace outside the
+        # user's profile (for example D:\\a\\_temp). The lock deliberately
+        # rejects that location, so exercise it under the supported per-user
+        # LOCALAPPDATA directory instead of relaxing production admission.
+        if os.name == "nt":
+            appdata = os.environ.get("LOCALAPPDATA")
+            if not appdata or not Path(appdata).is_dir():
+                self.fail("native Windows lock tests require existing LOCALAPPDATA")
+            temporary = tempfile.TemporaryDirectory(prefix="ocd-state-lock-", dir=appdata)
+        else:
+            temporary = tempfile.TemporaryDirectory(prefix="ocd-state-lock-")
         self.addCleanup(temporary.cleanup)
         self.parent = Path(temporary.name)
         self.state = self.parent / "private-state"
