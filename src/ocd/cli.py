@@ -40,6 +40,24 @@ def _parser() -> argparse.ArgumentParser:
     watch.add_argument("--interval", type=float, default=1.0, metavar="SECONDS",
                        help="positive polling interval in seconds (default: 1)")
 
+    observe = commands.add_parser(
+        "observe", help="opt-in bounded, durable foreground observations; never move or delete"
+    )
+    observe_commands = observe.add_subparsers(dest="observe_command", required=True)
+    for name in ("run", "status", "pause", "resume"):
+        command = observe_commands.add_parser(name, help=f"{name} the per-user observation state")
+        command.add_argument("--state-dir", type=Path, default=None,
+                             help="absolute per-user SQLite state directory (default: platform state path)")
+        if name == "run":
+            command.add_argument("--root", type=Path, help="registered source path (default: all roots)")
+            command.add_argument("--interval", type=float, default=30.0)
+            command.add_argument("--max-polls", type=int, default=None,
+                                 help="stop after this many polls (disposable tests/explicit one-shot runs)")
+            command.add_argument("--max-entries", type=int, default=20_000)
+            command.add_argument("--max-directories", type=int, default=4_000)
+            command.add_argument("--max-depth", type=int, default=24)
+            command.add_argument("--max-seconds", type=float, default=10.0)
+
     duplicates = commands.add_parser(
         "duplicates", help="find exact-content duplicate candidates; never change or delete files"
     )
@@ -378,6 +396,17 @@ def main(argv: list[str] | None = None) -> int:
                       "Independent restore and explicit consent are still required.")
             return 0 if usage_report.complete else 1
 
+        if args.command == "observe" and args.observe_command != "run":
+            from .observer import default_state_dir, observer_status, set_paused
+
+            state_dir = args.state_dir if args.state_dir is not None else default_state_dir()
+            if args.observe_command in ("pause", "resume"):
+                set_paused(state_dir, args.observe_command == "pause")
+            paused, count = observer_status(state_dir)
+            print(f"OBSERVE state={state_dir} paused={paused} durable_events={count}; "
+                  "read-only; no organizer service installed")
+            return 0
+
         config = load_config(path)
         if args.command == "roots":
             if args.roots_command == "add":
@@ -453,6 +482,33 @@ def main(argv: list[str] | None = None) -> int:
             except KeyboardInterrupt:
                 stop_event.set()
                 print("Watch stopped; no changes made")
+                return 130
+            return 0
+        if args.command == "observe":
+            from threading import Event, TIMEOUT_MAX
+            from .observer import default_state_dir, run_observer
+            from .scanner import ScanBudget
+
+            if not math.isfinite(args.interval) or args.interval <= 0 or args.interval > TIMEOUT_MAX:
+                raise ConfigError(f"--interval must be positive and <= {TIMEOUT_MAX:g} seconds")
+            budget = ScanBudget(max_entries=args.max_entries,
+                                max_directories=args.max_directories,
+                                max_depth=args.max_depth, max_seconds=args.max_seconds)
+            state_dir = args.state_dir if args.state_dir is not None else default_state_dir()
+
+            def display(event):
+                print(f"OBSERVE {event.kind.upper()} event={event.id} source={event.root} "
+                      f"detail={event.detail}; no files changed")
+
+            stop_event = Event()
+            try:
+                run_observer(_select_roots(config.roots, args.root, verify=False), display,
+                             state_dir=state_dir, stop_event=stop_event,
+                             interval_seconds=args.interval, max_polls=args.max_polls,
+                             budget=budget)
+            except KeyboardInterrupt:
+                stop_event.set()
+                print("Observe stopped; checkpoints retained; no files changed")
                 return 130
             return 0
         if args.command == "scan":
