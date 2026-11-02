@@ -13,6 +13,7 @@ import errno
 import os
 from pathlib import Path
 import stat
+import sys
 from typing import Iterator
 
 
@@ -240,10 +241,14 @@ def acquire_state_lock(directory: Path) -> Iterator[Path]:
     ``OCD_EXPERIMENTAL_WINDOWS_STATE_LOCK=1``. This is never called by an
     installed OCD service or the organizer's apply path.
     """
+    if os.name not in ("nt", "posix") or (
+        os.name == "posix" and not sys.platform.startswith("linux")
+    ):
+        raise UnsafeStateDirectory("state locks support Windows and Linux only")
     if os.name == "nt" and os.environ.get("OCD_EXPERIMENTAL_WINDOWS_STATE_LOCK") != "1":
         raise UnsafeStateDirectory("experimental Windows state lock disabled until native qualification")
     state = _private_state_dir(Path(directory))
-    if os.name == "posix":
+    if sys.platform.startswith("linux"):
         with _posix_lock(state) as lock_path:
             yield lock_path
     elif os.name == "nt":
