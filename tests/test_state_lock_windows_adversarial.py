@@ -117,6 +117,41 @@ class WindowsStatePathAdversarialTests(unittest.TestCase):
         except (StateLockBusy, UnsafeStateDirectory):
             pass  # Safe failure while another process still holds the lock.
 
+    def test_intermediate_ancestor_rename_cannot_split_live_lock(self) -> None:
+        """Pinning only the final state dir would miss its replaceable carrier."""
+        carrier = self.parent / "carrier"
+        carrier.mkdir()
+        nested_state = carrier / "nested" / "state"
+        (carrier / "nested").mkdir()
+        ready = self.parent / "nested-owner-ready.json"
+        owner = self._launch_holder(nested_state, ready)
+        first_id = json.loads(ready.read_text(encoding="utf-8"))
+        self.assertTrue(first_id["ino"])
+
+        parked = self.parent / "parked-original-carrier"
+        alternate = self.parent / "alternate-carrier"
+        (alternate / "nested").mkdir(parents=True)
+        try:
+            carrier.rename(parked)
+        except OSError as exc:
+            if getattr(exc, "winerror", None) in (5, 32, 33):
+                self.assertIsNone(owner.poll(), "owner must remain alive on denied rename")
+                return
+            raise
+
+        alternate.rename(carrier)
+        self.assertIsNone(owner.poll(), "owner must still hold the original inode")
+        try:
+            with acquire_state_lock(nested_state) as second:
+                info = second.stat()
+                self.fail(
+                    "SPLIT-BRAIN: replaced intermediate ancestor admitted "
+                    f"second holder; first={first_id} second="
+                    f"{{'dev':{info.st_dev},'ino':{info.st_ino}}}"
+                )
+        except (StateLockBusy, UnsafeStateDirectory):
+            pass
+
     def test_junction_substituted_after_state_validation_is_rejected(self) -> None:
         target = self.parent / "outside-target"
         target.mkdir()
