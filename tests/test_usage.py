@@ -120,6 +120,77 @@ class UsageTests(unittest.TestCase):
         self.assertTrue(any("cannot scan" in issue for issue in report.issues))
         self.assertEqual(report.logical_bytes, 2)
 
+    def test_queued_directory_replacement_is_incomplete(self):
+        from ocd import usage as usage_module
+
+        queued = self.root / "queued"
+        queued.mkdir()
+        (queued / "original").write_bytes(b"old")
+        replacement = Path(self.temporary.name) / "replacement"
+        replacement.mkdir()
+        (replacement / "new").write_bytes(b"unrelated")
+        swapped = False
+
+        def replace_directory():
+            nonlocal swapped
+            if not swapped:
+                queued.rename(self.root / "renamed-old")
+                replacement.rename(queued)
+                swapped = True
+
+        if usage_module._CAN_SCAN_FD:
+            real_open = usage_module._open_beneath_root
+
+            def raced_open(fd, components, flags):
+                if components == ("queued",):
+                    replace_directory()
+                return real_open(fd, components, flags)
+
+            patcher = patch.object(usage_module, "_open_beneath_root", side_effect=raced_open)
+        else:
+            real_check = usage_module._check_directory
+
+            def raced_check(path, root):
+                if path == queued:
+                    replace_directory()
+                return real_check(path, root)
+
+            patcher = patch.object(usage_module, "_check_directory", side_effect=raced_check)
+
+        with patcher:
+            report = scan_usage(self.root)
+        self.assertTrue(swapped)
+        self.assertFalse(report.complete)
+        self.assertTrue(any("directory identity" in item for item in report.issues), report.issues)
+        self.assertEqual(report.logical_bytes, 0, "replacement bytes must not be counted")
+
+    @unittest.skipUnless(os.name != "nt", "POSIX descriptor-relative mount boundary")
+    def test_file_on_other_device_marks_report_incomplete(self):
+        foreign = self.root / "foreign"
+        foreign.write_bytes(b"not attributable to starting filesystem")
+        real_stat = os.stat
+
+        class OtherDevice:
+            def __init__(self, original):
+                self.original = original
+
+            def __getattr__(self, attr):
+                if attr == "st_dev":
+                    return self.original.st_dev + 1
+                return getattr(self.original, attr)
+
+        def stat_with_foreign_mount(path, *args, **kwargs):
+            actual = real_stat(path, *args, **kwargs)
+            if path == "foreign" and kwargs.get("dir_fd") is not None:
+                return OtherDevice(actual)
+            return actual
+
+        with patch("ocd.usage.os.stat", side_effect=stat_with_foreign_mount):
+            report = scan_usage(self.root)
+        self.assertFalse(report.complete)
+        self.assertEqual(report.logical_bytes, 0)
+        self.assertTrue(any("other filesystem" in item for item in report.issues))
+
     def test_hardlinks_are_not_two_physical_allocations(self):
         original = self.root / "one"
         alias = self.root / "two"

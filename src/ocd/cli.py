@@ -55,7 +55,7 @@ def _parser() -> argparse.ArgumentParser:
     usage.add_argument("--path", type=Path, required=True,
                        help="absolute existing directory or drive root to measure")
     usage.add_argument("--max-entries", type=int, default=100_000,
-                       help="maximum directory entries visited (default: 100000)")
+                       help="maximum entries processed (one lookahead detects overflow; default: 100000)")
     usage.add_argument("--max-depth", type=int, default=32,
                        help="maximum directory depth from root (default: 32)")
     usage.add_argument("--top", type=int, default=20,

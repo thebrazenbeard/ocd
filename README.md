@@ -111,7 +111,7 @@ ocd usage --path D:\ --max-entries 100000 --top 20 --json
 ocd usage --path /srv/data --max-entries 100000 --top 20
 ```
 
-The results rank the largest observed files and immediate top-level groups. **Logical bytes are not reclaimable bytes.** On Windows, allocated size is reported as unknown; where POSIX allocation metadata exists, its deduplicated block estimate is still not proof of reclaimable storage. Links/reparse points are not traversed; mount boundaries, inaccessible entries, depth limits, and exhausted budgets produce **incomplete** reports (nonzero exit code) rather than silent success. A scan is a point-in-time observation and cannot authorize deletion. Visual treemaps, persistent indexing, cleanup-rule packs, and remote SSH/cloud exploration are **not implemented**.
+The results rank the largest observed files and immediate top-level groups. **Logical bytes are not reclaimable bytes.** On Windows, allocated size is reported as unknown; where POSIX allocation metadata exists, its deduplicated block estimate is still not proof of reclaimable storage. Links/reparse points and detected cross-device mount directories are excluded; inaccessible entries, depth limits, and exhausted budgets produce **incomplete** reports (nonzero exit code). Same-device bind mounts may be indistinguishable from ordinary directories. Windows pathname enumeration cannot yet guarantee safety against concurrent malicious junction swaps; use trusted, stable folders. A scan is a point-in-time observation and cannot authorize deletion. Visual treemaps, persistent indexing, cleanup-rule packs, and remote SSH/cloud exploration are **not implemented**.
 
 ### 3. Optionally authorize a local move (Linux only)
 

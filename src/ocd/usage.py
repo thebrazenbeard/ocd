@@ -69,7 +69,7 @@ def scan_usage(
     children: dict[Path, int] = {}
     largest: list[UsageItem] = []
     issues: list[str] = []
-    stack = [(root, 0)]
+    stack = [(root, 0, (original.st_dev, original.st_ino, original.st_mtime_ns))]
     stopped = False
 
     def issue(message: str) -> None:
@@ -90,7 +90,7 @@ def scan_usage(
             raise ValueError("usage root identity changed before opening")
     try:
         while stack and not stopped:
-            directory, depth = stack.pop()
+            directory, depth, expected = stack.pop()
             directory_fd: int | None = None
             try:
                 if root_fd is not None:
@@ -108,6 +108,15 @@ def scan_usage(
                         issue(f"directory unavailable: {directory}")
                         continue
                     handle = directory
+
+                current = (
+                    os.fstat(directory_fd) if directory_fd is not None
+                    else directory.lstat()
+                )
+                if (_is_link(current) or not stat.S_ISDIR(current.st_mode)
+                        or (current.st_dev, current.st_ino, current.st_mtime_ns) != expected):
+                    issue(f"directory identity or modification time changed: {directory}")
+                    continue
 
                 remaining = max_entries - entries
                 with os.scandir(handle) as stream:
@@ -130,14 +139,15 @@ def scan_usage(
                     if _is_link(details):
                         links += 1
                         continue
+                    if details.st_dev != original.st_dev:
+                        issue(f"other filesystem held: {path}")
+                        continue
                     if stat.S_ISDIR(details.st_mode):
                         directories += 1
-                        if details.st_dev != original.st_dev:
-                            issue(f"other filesystem held: {path}")
-                        elif depth >= max_depth:
+                        if depth >= max_depth:
                             issue(f"depth budget reached at {path}")
                         else:
-                            stack.append((path, depth + 1))
+                            stack.append((path, depth + 1, (details.st_dev, details.st_ino, details.st_mtime_ns)))
                         continue
                     if not stat.S_ISREG(details.st_mode):
                         special += 1
@@ -152,16 +162,24 @@ def scan_usage(
                     blocks = getattr(details, "st_blocks", None)
                     identity = (details.st_dev, details.st_ino)
                     if allocated_known and isinstance(blocks, int) and blocks >= 0 and identity[1] != 0:
-                        physical = blocks * 512
                         if identity not in identities:
+                            physical = blocks * 512
                             allocated += physical
                             identities.add(identity)
+                        # Shared hardlink allocation has no safe per-path attribution.
                     else:
                         allocated_known = False
                     largest.append(UsageItem(path, size, physical))
                     if len(largest) > top:
                         largest.sort(key=lambda item: (-item.logical_bytes, str(item.path)))
                         largest.pop()
+                after = (
+                    os.fstat(directory_fd) if directory_fd is not None
+                    else directory.lstat()
+                )
+                if (_is_link(after) or not stat.S_ISDIR(after.st_mode)
+                        or (after.st_dev, after.st_ino, after.st_mtime_ns) != expected):
+                    issue(f"directory changed during inventory: {directory}")
             except (OSError, ValueError) as exc:
                 issue(f"cannot scan {directory}: {type(exc).__name__}")
             finally:
@@ -174,7 +192,8 @@ def scan_usage(
     try:
         now = root.lstat()
         if (_is_link(now) or not stat.S_ISDIR(now.st_mode)
-                or now.st_dev != original.st_dev or now.st_ino != original.st_ino):
+                or now.st_dev != original.st_dev or now.st_ino != original.st_ino
+                or now.st_mtime_ns != original.st_mtime_ns):
             issue("usage root identity changed during scan")
     except OSError:
         issue("usage root disappeared during scan")
