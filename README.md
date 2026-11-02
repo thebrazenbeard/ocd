@@ -30,6 +30,7 @@ For machine-learning workflows, the target architecture keeps **code, manifests,
 | Review large-file cleanup observations | `cleanup review --path ABSOLUTE_DIR` lists large-file observations as **blocked** until independent retention/restore/live-use evidence and separate authorization exist; no deletion or reclaimable-byte claim |
 | Move tagged local files | Explicit `apply --yes` on **Linux only**, journaled and no-overwrite; not production-qualified |
 | Fetch a known remote artifact | Explicit manifest-based, size + SHA-256 verified download; Linux source-tested; experimental Windows publication **disabled by default** pending native qualification; not sync |
+| Independently verify one existing restored artifact | `artifact verify` streams and checks the selected manifest entry's exact local size and SHA-256, read-only on Windows/Linux; no deletion permission or proof of remote recoverability |
 | Cache known model/artifact bytes for a job | `cache import` / `cache materialize` content-addressed local staging on POSIX; no deletion, upload, or Windows qualification |
 | Windows organizing | Read-only source path exists; **apply is disabled** pending native verification |
 | Optional observe-only launch on login | Opt-in Linux user-service template and Windows per-user scheduled-task helper; no automatic moves; native host qualification pending |
@@ -163,6 +164,24 @@ ocd artifact fetch --manifest ./artifacts.json \
 ```
 
 The fetcher verifies exact size and SHA-256 before no-overwrite publication. Linux uses POSIX anchored publication. An experimental native Windows publication path exists but **fails closed by default**. For disposable-fixture qualification only, an operator must deliberately set `OCD_EXPERIMENTAL_WINDOWS_ARTIFACT_PUBLISH=1` for the process; it has **not passed live NTFS/ReFS qualification** and must not be used for valuable files. The [manual native Windows qualification workflow](.github/workflows/ocd-native-windows-qualification.yml) keeps unfinished rename/publication tests separate from normal cross-platform source CI; these tests are not proof of a supported Windows mutation path. This **downloads** a named remote file; it cannot create cloud backups, upload weights, or synchronize locations.
+
+### Verify a restored artifact independently (Windows/Linux, read-only)
+
+After a worker obtains an artifact through an authorized channel, OCD can check the **existing local file** against the same manifest without contacting GitHub or any remote server:
+
+```powershell
+# Windows: the destination root must already exist on a supported fixed local drive
+ocd artifact verify --manifest .\artifacts.json `
+  --destination-root D:\JobArtifacts --artifact models/example.gguf --json
+```
+
+```sh
+# Linux: checks an existing file; no download, cache import, move, or deletion
+ocd artifact verify --manifest ./artifacts.json \
+  --destination-root /srv/job-artifacts --artifact models/example.gguf --json
+```
+
+Successful verification returns `"verified": true` with the independently observed SHA-256 and byte count; failures return nonzero with `"verified": false`. Both responses state `"deletion_eligible": false` and `"reclaimable_bytes": null`. The verifier refuses unsafe links/reparse points, missing or changed files, and content mismatches. It does **not** create an artifact store, authenticate a worker to private GitHub Releases, prove future remote availability, or authorize eviction of the source copy. For private draft releases, arrange target-machine credentials and independently test retrieval before considering a separate deletion review.
 
 ### 5. Cache a verified artifact for on-demand use (POSIX source implementation)
 
