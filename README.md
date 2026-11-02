@@ -27,6 +27,7 @@ For machine-learning workflows, the target architecture keeps **code, manifests,
 | Continuously observe changes | `watch` polls in the foreground and **reports only** |
 | Find exact-content duplicate candidates | `duplicates` reads sizes and SHA-256; no deletion |
 | Inspect bounded disk usage and largest files | `usage --path ABSOLUTE_DIR` reports logical sizes, top-level groups, optional POSIX allocation estimate and JSON; read-only; no cleanup or treemap |
+| Review large-file cleanup observations | `cleanup review --path ABSOLUTE_DIR` lists large-file observations as **blocked** until independent retention/restore/live-use evidence and separate authorization exist; no deletion or reclaimable-byte claim |
 | Move tagged local files | Explicit `apply --yes` on **Linux only**, journaled and no-overwrite; not production-qualified |
 | Fetch a known remote artifact | Explicit manifest-based, size + SHA-256 verified download; Linux source-tested; experimental Windows publication **disabled by default** pending native qualification; not sync |
 | Cache known model/artifact bytes for a job | `cache import` / `cache materialize` content-addressed local staging on POSIX; no deletion, upload, or Windows qualification |
@@ -112,6 +113,14 @@ ocd usage --path /srv/data --max-entries 100000 --top 20
 ```
 
 The results rank the largest observed files and immediate top-level groups. **Logical bytes are not reclaimable bytes.** On Windows, allocated size is reported as unknown; where POSIX allocation metadata exists, its deduplicated block estimate is still not proof of reclaimable storage. Links/reparse points and detected cross-device mount directories are excluded; inaccessible entries, depth limits, and exhausted budgets produce **incomplete** reports (nonzero exit code). Same-device bind mounts may be indistinguishable from ordinary directories. Windows pathname enumeration cannot yet guarantee safety against concurrent malicious junction swaps; use trusted, stable folders. A scan is a point-in-time observation and cannot authorize deletion. Visual treemaps, persistent indexing, cleanup-rule packs, and remote SSH/cloud exploration are **not implemented**.
+
+### Review cleanup observations without deleting (Windows/Linux)
+
+```powershell
+ocd cleanup review --path "$env:USERPROFILE\Downloads" --max-entries 100000 --top 20 --json
+```
+
+This is an **evidence-only** review of the largest files observed by the same bounded scanner as `usage`. Every observation is **blocked** from deletion: large size is not proof of redundancy, retained backups, inactive use, or verified remote restoration. Reclaimable bytes remain **unknown**. If the scan is incomplete, it returns a nonzero exit code and **no candidates**; no organizer registration or deletion authorization is created. OCD does not yet have a qualified deletion executor, artifact-store eviction policy, or reversible cleanup staging.
 
 ### 3. Optionally authorize a local move (Linux only)
 

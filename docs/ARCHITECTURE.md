@@ -55,6 +55,12 @@ This source API repeatedly validates explicitly supplied roots, scans them, and 
 
 Logical byte totals count every regular-file pathname, including hardlink aliases. POSIX allocated-byte estimates count known `(st_dev, st_ino)` identities once using `st_blocks`, and are `null` when unavailable; Windows allocation remains **unknown**, never guessed from logical size. Directory group totals overlap by hierarchy if expanded, and neither logical nor estimated allocated bytes can be equated with safe reclaimable space. Results are snapshots, not filesystem authorization or deletion recommendations. A WinDirStat/SquirrelDisk-style visual interface, persistent index, certified cleanup rules, and remote exploration are not yet shipped.
 
+### Evidence-only cleanup review (`cleanup.review_cleanup`)
+
+`ocd cleanup review --path ABSOLUTE_DIRECTORY` reuses the bounded `usage.scan_usage` inventory without loading organizer configuration or acquiring write authority. A **complete** scan yields a deterministic top-N list of large-file observations. Every observation is blocked from deletion and carries unknown reclaimable bytes; no remote backup, retention, inactive-use, or ownership evidence is inferred from file size. An incomplete scan returns no observations and a nonzero CLI status with issues, not a misleading partial cleanup proposal.
+
+The command has no mutation API, deletion plan, reversible staging, automatic policy, or cloud/VN transfer integration. It is a foundation for future evidence-gated review, not a safe-to-delete recommendation.
+
 ### Exact-content duplicate candidates (`duplicates.scan_duplicates`)
 
 This source API examines regular files beneath only the explicitly supplied source roots, independent of extension tags and settle time. It skips symlinks/reparse points, de-duplicates names referring to the same inode, and hashes same-sized candidates with streaming SHA-256. Changed/disappeared candidates are skipped; scan/root/file/entry limits bound work and over-limit calls fail rather than return a misleading partial result. Groups are **read-only findings**: neither deletion nor hard-link replacement is offered. Reported logical duplicate bytes and potential reclaim bytes are estimates, not proof of physically recoverable space; hard links, sparse files, compression, reflinks, and concurrent changes complicate that measurement.
@@ -78,6 +84,7 @@ ocd [--config PATH] plan [--root SOURCE]
 ocd [--config PATH] watch [--root SOURCE] [--interval SECONDS]
 ocd [--config PATH] duplicates [--root SOURCE] [--max-files NUMBER] [--max-entries NUMBER]
 ocd usage --path ABSOLUTE_DIRECTORY [--max-entries NUMBER] [--max-depth NUMBER] [--top NUMBER] [--json]
+ocd cleanup review --path ABSOLUTE_DIRECTORY [--max-entries NUMBER] [--max-depth NUMBER] [--top NUMBER] [--json]
 ocd [--config PATH] apply --root SOURCE --yes
 ocd artifact fetch --manifest JSON --destination-root EXISTING_ABSOLUTE_DIR --artifact DESTINATION_RELPATH
 ocd cache import --store-root EXISTING_ABSOLUTE_DIR --source ABSOLUTE_FILE --sha256 HEX --size BYTES
