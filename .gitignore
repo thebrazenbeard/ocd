@@ -15,3 +15,5 @@ build/
 .coverage
 .ocd/
 *.journal.jsonl
+config.bat
+node_modules
