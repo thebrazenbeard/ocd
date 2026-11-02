@@ -63,6 +63,20 @@ def _parser() -> argparse.ArgumentParser:
     usage.add_argument("--json", action="store_true",
                        help="print a machine-readable report, including completeness")
 
+    cleanup = commands.add_parser(
+        "cleanup", help="review large-file observations; never delete or claim reclaimable bytes"
+    )
+    cleanup_commands = cleanup.add_subparsers(dest="cleanup_command", required=True)
+    review = cleanup_commands.add_parser(
+        "review", help="read-only large-file review; all deletion decisions are blocked"
+    )
+    review.add_argument("--path", type=Path, required=True,
+                        help="absolute existing directory to review")
+    review.add_argument("--max-entries", type=int, default=100_000)
+    review.add_argument("--max-depth", type=int, default=32)
+    review.add_argument("--top", type=int, default=20)
+    review.add_argument("--json", action="store_true", help="machine-readable blocked observations")
+
     apply = commands.add_parser("apply", help="replan and execute allowed moves (never delete)")
     apply.add_argument("--root", type=Path, required=True, help="registered source path")
     apply.add_argument("--yes", action="store_true", help="required consent to execute moves")
@@ -265,6 +279,50 @@ def main(argv: list[str] | None = None) -> int:
                     "No deletion or reclaimable-space claim."
                 )
             return 0 if report.complete else 1
+
+        if args.command == "cleanup":
+            # Evidence-only review. Deliberately no deletion, move, cache
+            # publication, organizer configuration, or authorization path.
+            from .cleanup import review_cleanup
+
+            report = review_cleanup(
+                args.path, max_entries=args.max_entries,
+                max_depth=args.max_depth, top=args.top,
+            )
+            usage_report = report.usage
+            if args.json:
+                import json
+
+                print(json.dumps({
+                    "root": str(usage_report.root),
+                    "complete": usage_report.complete,
+                    "entries_visited": usage_report.entries_visited,
+                    "logical_bytes": usage_report.logical_bytes,
+                    "allocated_bytes": usage_report.allocated_bytes,
+                    "observations": [{
+                        "path": str(item.path),
+                        "logical_bytes": item.logical_bytes,
+                        "deletion_eligible": item.deletion_eligible,
+                        "reclaimable_bytes": item.reclaimable_bytes,
+                        "blocked_reason": report.blocked_reason,
+                    } for item in report.observations],
+                    "issues": list(usage_report.issues),
+                    "deletion_eligible": False,
+                    "reclaimable_bytes": None,
+                }, sort_keys=True))
+            else:
+                print(f"CLEANUP REVIEW {str(usage_report.root)!r}: "
+                      f"{usage_report.entries_visited} entries, "
+                      f"{usage_report.logical_bytes} logical bytes; "
+                      "reclaimable bytes unknown")
+                for item in report.observations:
+                    print(f"BLOCKED {item.logical_bytes} logical bytes: "
+                          f"{str(item.path)!r}; {report.blocked_reason}")
+                for issue in usage_report.issues:
+                    print(f"INCOMPLETE {issue!r}")
+                print("No deletion eligible; no files changed by OCD. "
+                      "Independent restore and explicit consent are still required.")
+            return 0 if usage_report.complete else 1
 
         config = load_config(path)
         if args.command == "roots":
