@@ -5,9 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 from contextlib import closing, redirect_stdout
 import io
+import os
 import sqlite3
 import tempfile
 from threading import Event
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -43,6 +45,33 @@ class BoundedScanTests(unittest.TestCase):
             scan_root(self.root, budget=ScanBudget(max_depth=0))
         with self.assertRaisesRegex(ScanBudgetExceeded, "directory budget"):
             scan_root(self.root, budget=ScanBudget(max_directories=1))
+
+    def test_queued_directory_missing_fails_closed_in_windows_path_fallback(self):
+        nested = self.src / "nested"
+        nested.mkdir()
+        (nested / "file.txt").write_text("data")
+        from ocd import scanner
+        original = scanner._check_directory
+
+        def missing_descendant(path, source):
+            return path != nested and original(path, source)
+
+        with mock.patch("ocd.scanner._CAN_SCAN_FD", False), \
+             mock.patch("ocd.scanner._check_directory", side_effect=missing_descendant):
+            with self.assertRaisesRegex(ScanBudgetExceeded, "queued directory"):
+                scan_root(self.root, budget=ScanBudget())
+
+    @unittest.skipUnless(os.name != "nt", "POSIX openat traversal")
+    def test_queued_directory_missing_fails_closed_in_fd_traversal(self):
+        nested = self.src / "nested"
+        nested.mkdir()
+        (nested / "file.txt").write_text("data")
+        from ocd import scanner
+        if not scanner._CAN_SCAN_FD:
+            self.skipTest("directory-FD traversal unavailable")
+        with mock.patch("ocd.scanner._open_beneath_root", return_value=None):
+            with self.assertRaisesRegex(ScanBudgetExceeded, "queued directory"):
+                scan_root(self.root, budget=ScanBudget())
 
     def test_budget_validation(self):
         for kwargs in ({"max_entries": 0}, {"max_directories": True},
@@ -127,6 +156,24 @@ class DurableObserverTests(unittest.TestCase):
             with self.assertRaisesRegex(ObserverError, "already owned"):
                 self.run_once()
 
+    def test_writer_exit_preserves_replaced_lock(self):
+        lock = self.state / "observer.lock"
+        real_lstat = Path.lstat
+
+        def simulated_replacement(path, *args, **kwargs):
+            if path == lock:
+                # A concurrent actor replaced our lock between admission and
+                # shutdown. Simulate independent of OS open-file unlink rules.
+                return SimpleNamespace(st_dev=-1, st_ino=-1)
+            return real_lstat(path, *args, **kwargs)
+
+        with mock.patch.object(Path, "lstat", simulated_replacement):
+            with _writer(self.state, (self.root,)):
+                self.assertTrue(lock.exists())
+        self.assertTrue(lock.exists(), "must not delete another writer's lock")
+        with self.assertRaisesRegex(ObserverError, "already owned"):
+            self.run_once()
+
     def test_state_inside_monitored_root_refused_without_write(self):
         unsafe = self.src / "state"
         with self.assertRaisesRegex(ObserverError, "overlaps"):
@@ -140,6 +187,30 @@ class DurableObserverTests(unittest.TestCase):
         with self.assertRaises(ObserverError):
             self.run_once()
         self.assertEqual(db_path.read_bytes(), b"corrupted sqlite, not deleted")
+
+    def test_foreign_database_rejected_without_schema_or_journal_writes(self):
+        self.state.mkdir()
+        db_path = self.state / "observer.sqlite3"
+        with closing(sqlite3.connect(db_path)) as db:
+            db.execute("CREATE TABLE foreign_records(value TEXT)")
+            db.execute("INSERT INTO foreign_records VALUES('keep')")
+            db.commit()
+        original = db_path.read_bytes()
+        with self.assertRaisesRegex(ObserverError, "not OCD observer"):
+            self.run_once()
+        with self.assertRaisesRegex(ObserverError, "not OCD observer"):
+            set_paused(self.state, True)
+        self.assertEqual(db_path.read_bytes(), original)
+        self.assertFalse(Path(str(db_path) + "-wal").exists())
+        self.assertFalse(Path(str(db_path) + "-shm").exists())
+
+    @unittest.skipIf(os.name == "nt", "POSIX owner/mode protection")
+    def test_world_writable_state_directory_refused(self):
+        self.state.mkdir(mode=0o700)
+        self.state.chmod(0o777)
+        with self.assertRaisesRegex(ObserverError, "user-owned"):
+            self.run_once()
+        self.assertEqual(list(self.state.iterdir()), [])
 
     def test_transaction_failure_rolls_back_event_and_checkpoint(self):
         self.run_once()
