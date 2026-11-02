@@ -133,11 +133,13 @@ def _verify_windows(entry: ArtifactEntry, root: Path) -> ArtifactVerification:
                 api, _directory_chain(drive, parts[:-1]), stack
             )
             del parent  # Ancestor handles stay pinned by ExitStack.
-            # GENERIC_READ | FILE_READ_ATTRIBUTES; share reads/writes, never
-            # FILE_SHARE_DELETE. The file cannot be renamed away during read.
+            # GENERIC_READ | FILE_READ_ATTRIBUTES; share READ only. Refuse an
+            # already-open writer and block new writers/deletion while the
+            # file is being hashed. A reader-only verification must not race
+            # with a writer that restores size/mtime after changing bytes.
             handle = api._create(
                 "\\\\?\\" + str(destination), 0x80000000 | 0x80,
-                0x1 | 0x2, None, 3, 0x00200000, None,
+                0x1, None, 3, 0x00200000, None,
             )
             if handle in (None, ctypes.c_void_p(-1).value):
                 raise ctypes.WinError(ctypes.get_last_error())

@@ -1,6 +1,7 @@
 """Read-only artifact verification contract across Windows and Linux."""
 
 from contextlib import redirect_stderr, redirect_stdout
+import ctypes
 import hashlib
 import io
 import json
@@ -101,6 +102,34 @@ class ArtifactVerificationTests(unittest.TestCase):
                                   self.entry.size, candidate), self.root,
                 )
         self.assertEqual(outside_file.read_bytes(), self.payload)
+
+    @unittest.skipUnless(os.name == "nt", "native Windows file-sharing fixture")
+    def test_windows_refuses_already_open_writer(self):
+        # Deliberately hold a writable handle with FILE_SHARE_READ|WRITE.
+        # Verification's new FILE_SHARE_READ-only handle must be denied by
+        # NTFS sharing rules instead of hashing bytes a writer could change.
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        create = kernel.CreateFileW
+        create.argtypes = [ctypes.c_wchar_p, ctypes.c_uint32, ctypes.c_uint32,
+                           ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32,
+                           ctypes.c_void_p]
+        create.restype = ctypes.c_void_p
+        close = kernel.CloseHandle
+        close.argtypes = [ctypes.c_void_p]
+        close.restype = ctypes.c_int
+        writer = create(str(self.target), 0x40000000, 0x1 | 0x2, None, 3, 0, None)
+        invalid = ctypes.c_void_p(-1).value
+        if writer in (None, invalid):
+            self.fail(f"could not open writable test fixture: WinError {ctypes.get_last_error()}")
+        try:
+            with self.assertRaises(ArtifactError):
+                verification.verify_local_artifact(self.entry, self.root)
+            self.assertEqual(self.target.read_bytes(), self.payload)
+        finally:
+            self.assertTrue(close(writer))
+        # Closing the writer restores verification eligibility.
+        self.assertEqual(verification.verify_local_artifact(self.entry, self.root).sha256,
+                         self.entry.sha256)
 
     @unittest.skipUnless(os.name == "posix", "POSIX rename-race fixture")
     def test_file_path_replacement_during_hash_is_refused(self):
