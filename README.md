@@ -25,6 +25,7 @@ For machine-learning workflows, the target architecture keeps **code, manifests,
 | Register explicit local source/destination folders, folder tags, and extension tags | Implemented CLI; Linux fixture tests |
 | Inspect files and preview tagged moves | `scan` and `plan` are read-only |
 | Continuously observe changes | `watch` polls in the foreground and **reports only** |
+| Preserve bounded, read-only observations across manual restarts | `observe run` is an **opt-in foreground preview**: per-root scan budgets, a local SQLite event/checkpoint journal, pause/resume, no file moves; **not an installed service** |
 | Find exact-content duplicate candidates | `duplicates` reads sizes and SHA-256; no deletion |
 | Inspect bounded disk usage and largest files | `usage --path ABSOLUTE_DIR` reports logical sizes, top-level groups, optional POSIX allocation estimate, JSON, and an opt-in **static offline HTML treemap**; scanner is read-only, and HTML creation writes only the explicitly named new report file |
 | Review large-file cleanup observations | `cleanup review --path ABSOLUTE_DIR` lists large-file observations as **blocked** until independent retention/restore/live-use evidence and separate authorization exist; no deletion or reclaimable-byte claim |
@@ -75,6 +76,35 @@ ocd --config ./ocd.json watch --interval 2
 ```
 
 `watch` stays in the foreground and prints fresh plans when observations change. Stop it with Ctrl+C. **It never applies those plans**, even if a root was registered in `apply` mode.
+
+For a separately opted-in **durable, budgeted foreground** observer, use an
+existing registration and a per-user state directory outside every monitored
+source/destination:
+
+```sh
+ocd --config ./ocd.json observe run --max-entries 20000 --max-directories 4000 \
+  --max-depth 24 --max-seconds 10 --interval 30
+ocd --config ./ocd.json observe status
+ocd --config ./ocd.json observe pause
+ocd --config ./ocd.json observe resume
+```
+
+The state defaults to `%LOCALAPPDATA%\OCD\state` on Windows and the XDG
+per-user state directory on Linux. `--state-dir ABSOLUTE_DIR` selects another
+location. The first **complete** scan creates a durable observation; restarts
+without changes do not duplicate it, while complete changes missed during
+downtime are reconciled at the next scan. Exceeding any scan budget records an
+error and **does not advance** the last complete checkpoint. All events are
+bounded in number; the state directory must not overlap a registered root.
+Only one foreground writer may run per state directory. A stale lock or corrupt
+database requires deliberate operator recovery; OCD never removes them
+automatically. The observer reads metadata, so it cannot guarantee detection
+of every in-place content mutation, exactly-once console output, or isolation
+from hostile same-user processes. On Linux the state directory must be
+user-owned and not group/other writable; Windows custom-directory ACLs have
+not been independently qualified. **No organizer files move, even for an
+apply-mode registration.** This command does not install a service, schedule
+polls after logout, manage cloud accounts, or reclaim disk space.
 
 On Windows PowerShell, read-only registration and planning use the same commands with Windows paths:
 

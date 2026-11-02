@@ -8,6 +8,7 @@ performing an operation because the filesystem can change after a scan.
 from __future__ import annotations
 
 import errno
+from dataclasses import dataclass
 import math
 import os
 from pathlib import Path
@@ -25,6 +26,58 @@ _CAN_SCAN_FD = (
     and hasattr(os, "O_DIRECTORY")
     and hasattr(os, "O_NOFOLLOW")
 )
+
+
+class ScanBudgetExceeded(RuntimeError):
+    """An incomplete inventory must never be committed as a full observation."""
+
+
+@dataclass(frozen=True)
+class ScanBudget:
+    """Explicit limits for a durable monitor's source traversal."""
+
+    max_entries: int = 20_000
+    max_directories: int = 4_000
+    max_depth: int = 24
+    max_seconds: float = 10.0
+
+    def __post_init__(self) -> None:
+        for name in ("max_entries", "max_directories"):
+            value = getattr(self, name)
+            if type(value) is not int or value < 1:
+                raise ValueError(f"{name} must be a positive integer")
+        if type(self.max_depth) is not int or self.max_depth < 0:
+            raise ValueError("max_depth must be a nonnegative integer")
+        if isinstance(self.max_seconds, bool) or not isinstance(self.max_seconds, (int, float)):
+            raise ValueError("max_seconds must be a finite positive number")
+        if not math.isfinite(self.max_seconds) or self.max_seconds <= 0:
+            raise ValueError("max_seconds must be a finite positive number")
+
+
+class _ScanTracker:
+    def __init__(self, budget: ScanBudget):
+        self.budget = budget
+        self.started = time.monotonic()
+        self.entries = 0
+        self.directories = 0
+
+    def _time(self) -> None:
+        if time.monotonic() - self.started > self.budget.max_seconds:
+            raise ScanBudgetExceeded("scan elapsed-time budget exceeded; observation incomplete")
+
+    def directory(self, depth: int) -> None:
+        self._time()
+        if depth > self.budget.max_depth:
+            raise ScanBudgetExceeded("scan depth budget exceeded; observation incomplete")
+        self.directories += 1
+        if self.directories > self.budget.max_directories:
+            raise ScanBudgetExceeded("scan directory budget exceeded; observation incomplete")
+
+    def entry(self) -> None:
+        self._time()
+        self.entries += 1
+        if self.entries > self.budget.max_entries:
+            raise ScanBudgetExceeded("scan entry budget exceeded; observation incomplete")
 
 
 def _is_reparse_point(details: os.stat_result) -> bool:
@@ -118,7 +171,8 @@ def _open_beneath_root(root_fd: int, components: tuple[str, ...], flags: int) ->
 
 
 def _scan_with_directory_fds(
-    source: Path, source_details: os.stat_result, destination: Path, cutoff_ns: int
+    source: Path, source_details: os.stat_result, destination: Path, cutoff_ns: int,
+    tracker: _ScanTracker | None = None,
 ) -> list[FileEntry]:
     """Anchor recursion to opened directory inodes, never a re-resolved path.
 
@@ -140,25 +194,35 @@ def _scan_with_directory_fds(
     discovered: list[FileEntry] = []
     # Queue identities, not opened descriptors: a root with thousands of
     # siblings must not exhaust RLIMIT_NOFILE before visiting the first one.
-    pending: list[tuple[Path, tuple[int, int]]] = [(source, _file_identity(source_details))]
+    pending: list[tuple[Path, tuple[int, int], int]] = [(source, _file_identity(source_details), 0)]
     try:
         while pending:
-            directory, expected_identity = pending.pop()
+            directory, expected_identity, depth = pending.pop()
             directory_fd = (
                 root_fd
                 if directory == source
                 else _open_beneath_root(root_fd, directory.relative_to(source).parts, flags)
             )
             if directory_fd is None:
+                if tracker is not None:
+                    raise ScanBudgetExceeded("queued directory disappeared during bounded scan; observation incomplete")
                 continue
             try:
                 if _file_identity(os.fstat(directory_fd)) != expected_identity:
+                    if tracker is not None:
+                        raise ScanBudgetExceeded("queued directory changed identity; observation incomplete")
                     continue
+                if tracker is not None:
+                    tracker.directory(depth)
                 with os.scandir(directory_fd) as children:
                     for child in children:
+                        if tracker is not None:
+                            tracker.entry()
                         try:
                             details = child.stat(follow_symlinks=False)
                         except FileNotFoundError:
+                            if tracker is not None:
+                                raise ScanBudgetExceeded("scanned entry disappeared; observation incomplete")
                             continue
                         if _is_link(details):
                             continue
@@ -167,7 +231,9 @@ def _scan_with_directory_fds(
                         if destination == path or destination in path.parents:
                             continue
                         if stat.S_ISDIR(details.st_mode):
-                            pending.append((path, _file_identity(details)))
+                            if tracker is not None and depth + 1 > tracker.budget.max_depth:
+                                raise ScanBudgetExceeded("scan depth budget exceeded; observation incomplete")
+                            pending.append((path, _file_identity(details), depth + 1))
                         elif stat.S_ISREG(details.st_mode) and details.st_mtime_ns <= cutoff_ns:
                             discovered.append(
                                 FileEntry(path=path, size=details.st_size, mtime_ns=details.st_mtime_ns)
@@ -180,7 +246,10 @@ def _scan_with_directory_fds(
     return discovered
 
 
-def _scan_by_path(source: Path, destination: Path, cutoff_ns: int) -> list[FileEntry]:
+def _scan_by_path(
+    source: Path, destination: Path, cutoff_ns: int,
+    tracker: _ScanTracker | None = None,
+) -> list[FileEntry]:
     """Windows fallback: validate paths before and immediately after opening.
 
     Windows os.scandir does not support directory descriptors. Rechecking
@@ -188,19 +257,27 @@ def _scan_by_path(source: Path, destination: Path, cutoff_ns: int) -> list[FileE
     replacements cannot be made atomic through this standard-library API.
     """
     discovered: list[FileEntry] = []
-    pending = [source]
+    pending = [(source, 0)]
     while pending:
-        directory = pending.pop()
+        directory, depth = pending.pop()
         if not _check_directory(directory, source):
+            if tracker is not None:
+                raise ScanBudgetExceeded("queued directory disappeared or changed; observation incomplete")
             continue
+        if tracker is not None:
+            tracker.directory(depth)
         before = directory.lstat()
         with os.scandir(directory) as children:
             if not _check_directory(directory, source) or not _same_file(before, directory.lstat()):
                 raise ValueError(f"Directory changed during scan: {directory}")
             for child in children:
+                if tracker is not None:
+                    tracker.entry()
                 try:
                     details = child.stat(follow_symlinks=False)
                 except FileNotFoundError:
+                    if tracker is not None:
+                        raise ScanBudgetExceeded("scanned entry disappeared; observation incomplete")
                     continue
                 if _is_link(details):
                     continue
@@ -209,14 +286,16 @@ def _scan_by_path(source: Path, destination: Path, cutoff_ns: int) -> list[FileE
                 if destination == path or destination in path.parents:
                     continue
                 if stat.S_ISDIR(details.st_mode):
-                    pending.append(path)
+                    if tracker is not None and depth + 1 > tracker.budget.max_depth:
+                        raise ScanBudgetExceeded("scan depth budget exceeded; observation incomplete")
+                    pending.append((path, depth + 1))
                 elif stat.S_ISREG(details.st_mode) and details.st_mtime_ns <= cutoff_ns:
                     discovered.append(FileEntry(path=path, size=details.st_size, mtime_ns=details.st_mtime_ns))
 
     return discovered
 
 
-def scan_root(root: RootConfig) -> tuple[FileEntry, ...]:
+def scan_root(root: RootConfig, *, budget: ScanBudget | None = None) -> tuple[FileEntry, ...]:
     """Return stable regular files beneath a registered source root.
 
     Paths are absolute; results have a deterministic lexical path order.
@@ -233,6 +312,9 @@ def scan_root(root: RootConfig) -> tuple[FileEntry, ...]:
         raise ValueError("settle_seconds must be a finite, nonnegative number") from exc
     if not math.isfinite(settle_seconds) or settle_seconds < 0:
         raise ValueError("settle_seconds must be a finite, nonnegative number")
+    if budget is not None and not isinstance(budget, ScanBudget):
+        raise TypeError("budget must be a ScanBudget or None")
+    tracker = _ScanTracker(budget) if budget is not None else None
 
     source = Path(root.source).absolute()
     try:
@@ -270,8 +352,11 @@ def scan_root(root: RootConfig) -> tuple[FileEntry, ...]:
 
     cutoff_ns = time.time_ns() - int(settle_seconds * 1_000_000_000)
     if _CAN_SCAN_FD:
-        discovered = _scan_with_directory_fds(source, source_details, destination, cutoff_ns)
+        discovered = _scan_with_directory_fds(source, source_details, destination, cutoff_ns, tracker)
     else:
-        discovered = _scan_by_path(source, destination, cutoff_ns)
+        discovered = _scan_by_path(source, destination, cutoff_ns, tracker)
+
+    if tracker is not None:
+        tracker._time()
 
     return tuple(sorted(discovered, key=lambda entry: str(entry.path)))

@@ -49,6 +49,27 @@ These are safety contracts, not a statement that transactional durability, power
 
 This source API repeatedly validates explicitly supplied roots, scans them, and rebuilds their full plans at a caller-specified interval. The first observation and later changes emit `change` events containing current files, proposed moves, and holds. Per-root scan/plan failures emit coalesced `error` events; other roots continue to be observed. A caller-owned stop event or bounded poll count ends the loop. No files are moved, including when a root is configured `apply`; this is polling in the invoking process, **not** an installed watcher, event-driven monitor, scheduler, or daemon.
 
+### Opt-in bounded durable observations (`observer.run_observer`)
+
+This is a second, foreground-only path. It passes explicit file-entry,
+directory, depth, and elapsed-time budgets into `scanner.scan_root`; a budget
+exception is an incomplete/error result, **never** an accepted partial
+fingerprint. A per-user SQLite database holds each selected registered root's
+last complete observation digest, a bounded event/error history, and pause
+state. The event and checkpoint commit in one transaction. A single-writer
+lock prevents two concurrently started observer processes from committing to
+the same state directory; after a crash, a leftover lock requires explicit
+operator recovery rather than unsafe automatic takeover. Symlink/reparse
+state paths, corrupted databases, and state inside a registered root fail
+closed; preexisting SQLite state must have OCD's application ID and complete
+expected schema before any write. POSIX state dirs must be user-owned and not
+group/other writable (custom Windows ACLs remain unqualified). Detected
+queued-directory and file-entry disappearance during bounded scans is
+incomplete/error, not a new checkpoint. On restart, a complete rescan reconciles against the last committed
+digest (including the disappearance of the final file). This is a *metadata
+snapshot*, not byte-content change detection or an automatic organizer.
+Nothing calls `apply_moves`, and no service is installed by this feature.
+
 ### Read-only disk usage (`usage.scan_usage`)
 
 `ocd usage --path ABSOLUTE_DIRECTORY` is separate from organizer registration, destination routing, and any mutating command. It inventories an explicitly selected Windows or Linux directory with processed-entry, depth, and output limits (one directory-name lookahead detects overflow); it does not read file contents, write journals, move data, or delete anything. The output includes largest observed files and top-level logical-size groups. The POSIX traversal uses directory descriptors and `O_NOFOLLOW`; Windows uses no-reparse path checks and remains subject to native path-race qualification. Symbolic links, Windows reparse points, and detected cross-device mounted directories are not traversed. Same-device bind mounts cannot reliably be detected, so reported bytes can include their contents. Windows pathname enumeration is best effort against concurrent malicious junction swaps, not yet handle-anchored or live NTFS-qualified. Rejected entries, inaccessible subtrees, exhausted budgets, and observed directory instability make the report **incomplete** and cause a nonzero CLI status.
@@ -86,6 +107,8 @@ ocd [--config PATH] roots list
 ocd [--config PATH] scan [--root SOURCE]
 ocd [--config PATH] plan [--root SOURCE]
 ocd [--config PATH] watch [--root SOURCE] [--interval SECONDS]
+ocd [--config PATH] observe run [--root SOURCE] [--state-dir ABSOLUTE_DIR] [--interval SECONDS] [--max-polls COUNT] [--max-entries COUNT] [--max-directories COUNT] [--max-depth COUNT] [--max-seconds SECONDS]
+ocd [--config PATH] observe status|pause|resume [--state-dir ABSOLUTE_DIR]
 ocd [--config PATH] duplicates [--root SOURCE] [--max-files NUMBER] [--max-entries NUMBER]
 ocd usage --path ABSOLUTE_DIRECTORY [--max-entries NUMBER] [--max-depth NUMBER] [--top NUMBER] [--json]
 ocd cleanup review --path ABSOLUTE_DIRECTORY [--max-entries NUMBER] [--max-depth NUMBER] [--top NUMBER] [--json]
