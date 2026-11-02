@@ -204,9 +204,13 @@ def _scan_with_directory_fds(
                 else _open_beneath_root(root_fd, directory.relative_to(source).parts, flags)
             )
             if directory_fd is None:
+                if tracker is not None:
+                    raise ScanBudgetExceeded("queued directory disappeared during bounded scan; observation incomplete")
                 continue
             try:
                 if _file_identity(os.fstat(directory_fd)) != expected_identity:
+                    if tracker is not None:
+                        raise ScanBudgetExceeded("queued directory changed identity; observation incomplete")
                     continue
                 if tracker is not None:
                     tracker.directory(depth)
@@ -217,6 +221,8 @@ def _scan_with_directory_fds(
                         try:
                             details = child.stat(follow_symlinks=False)
                         except FileNotFoundError:
+                            if tracker is not None:
+                                raise ScanBudgetExceeded("scanned entry disappeared; observation incomplete")
                             continue
                         if _is_link(details):
                             continue
@@ -255,6 +261,8 @@ def _scan_by_path(
     while pending:
         directory, depth = pending.pop()
         if not _check_directory(directory, source):
+            if tracker is not None:
+                raise ScanBudgetExceeded("queued directory disappeared or changed; observation incomplete")
             continue
         if tracker is not None:
             tracker.directory(depth)
@@ -268,6 +276,8 @@ def _scan_by_path(
                 try:
                     details = child.stat(follow_symlinks=False)
                 except FileNotFoundError:
+                    if tracker is not None:
+                        raise ScanBudgetExceeded("scanned entry disappeared; observation incomplete")
                     continue
                 if _is_link(details):
                     continue

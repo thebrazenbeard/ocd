@@ -8,7 +8,7 @@ commit each change event and its checkpoint together.
 
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 import hashlib
 import json
@@ -29,6 +29,9 @@ from .types import RootConfig
 
 class ObserverError(RuntimeError):
     """Unsafe, missing, locked, or inconsistent durable observer state."""
+
+
+_APPLICATION_ID = 0x4F43444F  # Explicit SQLite ownership marker: "OCDO".
 
 
 @dataclass(frozen=True)
@@ -71,6 +74,10 @@ def _check_state_path(state_dir: Path, *, create: bool) -> Path:
         if (not stat.S_ISDIR(details.st_mode) or stat.S_ISLNK(details.st_mode)
                 or getattr(details, "st_file_attributes", 0) & reparse):
             raise ObserverError(f"linked or non-directory state ancestor refused: {component}")
+    if os.name != "nt":
+        state_info = state_dir.lstat()
+        if state_info.st_uid != os.geteuid() or state_info.st_mode & 0o022:
+            raise ObserverError("observer state must be user-owned and not group/other writable")
     return state_dir
 
 
@@ -106,6 +113,25 @@ def _check_database_files(db: Path) -> None:
 
 def _connect(db: Path) -> sqlite3.Connection:
     _check_database_files(db)
+    existed = db.exists()
+    if existed:
+        # A foreign SQLite database is NOT an OCD state migration target.
+        # Inspect it without permitting journal, schema, or header writes.
+        try:
+            with closing(sqlite3.connect(db.as_uri() + "?mode=ro&immutable=1",
+                                         uri=True, timeout=0.5)) as inspection:
+                if inspection.execute("PRAGMA application_id").fetchone() != (_APPLICATION_ID,):
+                    raise ObserverError("existing database is not OCD observer state")
+                if inspection.execute("PRAGMA quick_check").fetchone() != ("ok",):
+                    raise ObserverError("observer database integrity check failed")
+                tables = {row[0] for row in inspection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'")}
+                if not {"meta", "roots", "events", "control"}.issubset(tables):
+                    raise ObserverError("incomplete observer state schema")
+                if inspection.execute("SELECT version FROM meta").fetchall() != [(1,)]:
+                    raise ObserverError("unsupported observer state schema")
+        except (sqlite3.DatabaseError, OSError) as exc:
+            raise ObserverError(f"cannot inspect existing observer database: {exc}") from exc
     connection: sqlite3.Connection | None = None
     try:
         connection = sqlite3.connect(str(db), timeout=0.5, isolation_level=None)
@@ -114,30 +140,28 @@ def _connect(db: Path) -> sqlite3.Connection:
         result = connection.execute("PRAGMA quick_check").fetchone()
         if result != ("ok",):
             raise ObserverError("observer database integrity check failed; preserve state and recover manually")
-        connection.execute("PRAGMA journal_mode=WAL")
         connection.execute("PRAGMA synchronous=FULL")
-        connection.executescript("""
-            CREATE TABLE IF NOT EXISTS meta(version INTEGER NOT NULL);
-            CREATE TABLE IF NOT EXISTS roots(
-                source TEXT PRIMARY KEY,
-                fingerprint TEXT,
-                last_error TEXT
-            );
-            CREATE TABLE IF NOT EXISTS events(
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                source TEXT NOT NULL,
-                kind TEXT NOT NULL CHECK(kind IN ('change','error')),
-                fingerprint TEXT,
-                detail TEXT NOT NULL,
-                created_ns INTEGER NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS control(key TEXT PRIMARY KEY, value TEXT NOT NULL);
-        """)
-        versions = connection.execute("SELECT version FROM meta").fetchall()
-        if not versions:
-            connection.execute("INSERT INTO meta(version) VALUES(1)")
-        elif versions != [(1,)]:
-            raise ObserverError("unsupported observer state schema; preserve database")
+        if not existed:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                for statement in (
+                    "CREATE TABLE meta(version INTEGER NOT NULL)",
+                    "CREATE TABLE roots(source TEXT PRIMARY KEY, fingerprint TEXT, last_error TEXT)",
+                    "CREATE TABLE events(id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                    "source TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('change','error')), "
+                    "fingerprint TEXT, detail TEXT NOT NULL, created_ns INTEGER NOT NULL)",
+                    "CREATE TABLE control(key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+                    "INSERT INTO meta(version) VALUES(1)",
+                ):
+                    connection.execute(statement)
+                connection.execute(f"PRAGMA application_id={_APPLICATION_ID}")
+                connection.execute("COMMIT")
+            except BaseException:
+                connection.execute("ROLLBACK")
+                raise
+        elif connection.execute("PRAGMA application_id").fetchone() != (_APPLICATION_ID,):
+            raise ObserverError("observer state changed since read-only validation")
+        connection.execute("PRAGMA journal_mode=WAL")
         return connection
     except (sqlite3.DatabaseError, OSError, ObserverError) as exc:
         if connection is not None:
@@ -163,10 +187,21 @@ def _writer(state_dir: Path, roots: tuple[RootConfig, ...]) -> Iterator[sqlite3.
     finally:
         if connection is not None:
             connection.close()
+        # A removed/replaced lock no longer belongs to this process. In
+        # particular, never erase a subsequent writer's lock during exit.
+        # This identity check is best effort; hostile same-user lock-path
+        # races still require OS-level qualification.
+        try:
+            owned = os.fstat(fd)
+            current = lock.lstat()
+            release_own_lock = (owned.st_dev, owned.st_ino) == (current.st_dev, current.st_ino)
+        except OSError:
+            release_own_lock = False
         os.close(fd)
-        # Clean exits release our own lock only. A killed process retains its
-        # lock for explicit operator investigation rather than unsafe takeover.
-        lock.unlink(missing_ok=True)
+        # Clean exits release only the same inode they created. A killed
+        # process retains its lock for explicit operator investigation.
+        if release_own_lock:
+            lock.unlink(missing_ok=True)
 
 
 def _fingerprint(root: RootConfig, files, plan) -> str:

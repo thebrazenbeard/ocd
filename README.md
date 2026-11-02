@@ -100,7 +100,9 @@ Only one foreground writer may run per state directory. A stale lock or corrupt
 database requires deliberate operator recovery; OCD never removes them
 automatically. The observer reads metadata, so it cannot guarantee detection
 of every in-place content mutation, exactly-once console output, or isolation
-from hostile same-user processes. **No organizer files move, even for an
+from hostile same-user processes. On Linux the state directory must be
+user-owned and not group/other writable; Windows custom-directory ACLs have
+not been independently qualified. **No organizer files move, even for an
 apply-mode registration.** This command does not install a service, schedule
 polls after logout, manage cloud accounts, or reclaim disk space.
 
