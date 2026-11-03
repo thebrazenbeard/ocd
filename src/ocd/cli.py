@@ -304,7 +304,7 @@ def main(argv: list[str] | None = None) -> int:
             report = scan_usage(
                 args.path, max_entries=args.max_entries,
                 top=args.top, max_depth=args.max_depth,
-                include_hierarchy=args.hierarchy_json,
+                include_hierarchy=args.hierarchy_json or args.html is not None,
             )
             if args.html is not None:
                 from .treemap import write_usage_html

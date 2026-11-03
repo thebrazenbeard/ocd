@@ -1,13 +1,16 @@
 """Offline, read-only treemap rendering for bounded OCD usage observations.
 
-The HTML has no JavaScript or network dependencies. Rendering never changes the
-scanned tree, and explicit publication refuses existing files and unsafe paths.
-No logical or allocated byte count implies recoverable storage.
+A static SVG remains useful without scripts. Reports with directory observations
+also carry one hash-authorized offline drilldown script. Report publication never
+changes the scanned tree, and byte counts never imply recoverable storage.
 """
 
 from __future__ import annotations
 
+import base64
+import hashlib
 from html import escape
+import json
 import os
 from pathlib import Path
 import stat
@@ -20,6 +23,153 @@ _PALETTE = (
     "#2c7da0", "#5b5f97", "#e09f3e", "#469d88", "#b56576",
     "#4d908e", "#8566aa", "#bc6c25", "#3d85c6", "#8d99ae",
 )
+
+_MAX_INTERACTIVE_DIRECTORIES = 2048
+
+# A fixed, independently authored script. Its SHA-256 is placed in the CSP;
+# scripts are never built from filesystem content or interpolated paths.
+_DRILLDOWN_SCRIPT = r"""'use strict';
+(() => {
+  const dataElement = document.getElementById('ocd-directory-data');
+  const stage = document.getElementById('ocd-directory-drilldown');
+  if (!dataElement || !stage) return;
+  const model = JSON.parse(dataElement.textContent);
+  const nodes = model.nodes;
+  const children = new Map();
+  for (const node of nodes) children.set(node.id, []);
+  for (const node of nodes) {
+    if (node.parent !== null) children.get(node.parent).push(node);
+  }
+  const buttons = {
+    home: document.getElementById('ocd-drill-home'),
+    up: document.getElementById('ocd-drill-up'),
+    crumbs: document.getElementById('ocd-drill-crumbs'),
+    list: document.getElementById('ocd-drill-list'),
+    svg: document.getElementById('ocd-drill-svg'),
+    status: document.getElementById('ocd-drill-status'),
+  };
+  const ns = 'http://www.w3.org/2000/svg';
+  let current = 0;
+  const history = [];
+  const make = (name, className, value) => {
+    const element = document.createElement(name);
+    if (className) element.className = className;
+    if (value !== undefined) element.textContent = value;
+    return element;
+  };
+  const fmt = (size) => BigInt(size).toLocaleString('en-US') + ' bytes';
+  const label = (node) => node.id === 0 ? model.root : node.name;
+  const ancestors = (id) => {
+    const path = [];
+    let node = nodes[id];
+    while (node) { path.push(node); node = node.parent === null ? null : nodes[node.parent]; }
+    return path.reverse();
+  };
+  const enter = (id, focusReturn = null) => {
+    if (focusReturn) history.push({ id: current, focusReturn });
+    current = id;
+    paint();
+    buttons.status.focus();
+  };
+  const parent = () => {
+    if (current === 0) return;
+    const saved = history.pop();
+    current = nodes[current].parent;
+    paint();
+    if (saved && saved.id === current && saved.focusReturn) {
+      // Both list buttons and SVG tiles represent a directory. Restore focus
+      // to the *kind* of control used, never the first document-wide match.
+      const scope = saved.focusReturn.kind === 'tile' ? buttons.svg : buttons.list;
+      for (const target of scope.querySelectorAll('[data-drill-id]')) {
+        if (target.dataset.drillId === String(saved.focusReturn.id)) {
+          target.focus(); return;
+        }
+      }
+    }
+    buttons.up.focus();
+  };
+  const home = () => { current = 0; history.length = 0; paint(); buttons.home.focus(); };
+  const addButton = (node, text, className = '') => {
+    const button = make('button', className, text);
+    button.type = 'button';
+    button.dataset.drillId = String(node.id);
+    button.addEventListener('click', () => enter(node.id, { id: node.id, kind: 'list' }));
+    return button;
+  };
+  const paint = () => {
+    const node = nodes[current];
+    buttons.crumbs.replaceChildren();
+    for (const crumb of ancestors(current)) {
+      const button = make('button', '', label(crumb));
+      button.type = 'button';
+      if (crumb.id === current) button.setAttribute('aria-current', 'location');
+      button.addEventListener('click', () => enter(crumb.id));
+      buttons.crumbs.append(button);
+    }
+    buttons.up.disabled = current === 0;
+    buttons.list.replaceChildren();
+    buttons.svg.replaceChildren();
+    const subdirs = (children.get(current) || []).slice()
+      .sort((a,b) => BigInt(a.size) === BigInt(b.size)
+        ? a.name.localeCompare(b.name) : BigInt(a.size) > BigInt(b.size) ? -1 : 1);
+    const options = subdirs.map(child => ({ node: child, name: child.name, size: child.size }));
+    if (BigInt(node.direct) > 0n) options.push({ node: null, name: '(files directly here)', size: node.direct });
+    if (BigInt(node.omitted) > 0n) options.push({ node: null, name: '(more observed subdirectories; details omitted)', size: node.omitted });
+    if (!options.length) buttons.list.append(make('li', '', 'No regular-file bytes observed in this directory.'));
+    for (const option of options) {
+      const item = make('li', '');
+      if (option.node) item.append(addButton(option.node, option.name));
+      else item.append(make('span', '', option.name));
+      item.append(make('span', 'ocd-drill-size', fmt(option.size)));
+      buttons.list.append(item);
+    }
+    const area = options.filter(option => BigInt(option.size) > 0n);
+    const total = area.reduce((sum, option) => sum + BigInt(option.size), 0n);
+    let offset = 0;
+    area.forEach((option, index) => {
+      // BigInt retains exact byte labels; area is only a visual approximation.
+      const width = Number(BigInt(option.size) * 1000000000n / total) / 1000000;
+      const rect = document.createElementNS(ns, 'rect');
+      rect.setAttribute('x', String(offset));
+      rect.setAttribute('y', '0');
+      rect.setAttribute('width', String(Math.max(0, width - 1)));
+      rect.setAttribute('height', '380');
+      rect.setAttribute('fill', ['#2c7da0','#5b5f97','#e09f3e','#469d88','#b56576'][index % 5]);
+      const title = document.createElementNS(ns, 'title');
+      title.textContent = option.name + ': ' + fmt(option.size);
+      rect.append(title);
+      if (option.node) {
+        rect.setAttribute('data-drill-id', String(option.node.id));
+        rect.setAttribute('role', 'button');
+        rect.setAttribute('tabindex', '0');
+        rect.setAttribute('aria-label', 'Open ' + option.name + ', ' + fmt(option.size));
+        rect.addEventListener('click', () => enter(option.node.id, { id: option.node.id, kind: 'tile' }));
+        rect.addEventListener('keydown', event => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault(); enter(option.node.id, { id: option.node.id, kind: 'tile' });
+          }
+        });
+      }
+      buttons.svg.append(rect);
+      offset += width;
+    });
+    buttons.status.textContent = 'Directory ' + label(node) + ': ' + fmt(node.size) +
+      ' observed logical bytes. ' + (model.complete ? 'Complete scan.' : 'INCOMPLETE scan; totals can omit files.') +
+      (model.truncated ? ' Interactive directory detail capped at ' + model.limit + ' entries.' : '');
+  };
+  buttons.up.addEventListener('click', parent);
+  buttons.home.addEventListener('click', home);
+  stage.addEventListener('keydown', event => {
+    if (event.key === 'Escape' || event.key === 'Backspace') {
+      if (event.target.isContentEditable || /^(INPUT|TEXTAREA)$/.test(event.target.tagName)) return;
+      if (current !== 0) { event.preventDefault(); parent(); }
+    }
+  });
+  paint();
+  stage.hidden = false;
+  const staticChart = document.getElementById('ocd-static-treemap');
+  if (staticChart) staticChart.hidden = true;
+})();"""
 
 
 def _size(value: int) -> str:
@@ -39,6 +189,92 @@ def _within(path: Path, root: Path) -> bool:
         return os.path.commonpath((child, base)) == base
     except ValueError:
         return False
+
+
+def _interactive_model(report: UsageReport) -> dict[str, object] | None:
+    """Build a bounded BFS tree; excluded children remain disclosed as a group.
+
+    The source hierarchy counts *logical path observations*, not allocated or
+    reclaimable bytes. Directory completeness reflects the whole scan.
+    """
+    if not report.directory_totals:
+        return None
+    by_path = {item.path: item for item in report.directory_totals}
+    if report.root not in by_path:
+        return None
+    children: dict[Path, list[Path]] = {}
+    for path in by_path:
+        if path == report.root:
+            continue
+        try:
+            relative = path.relative_to(report.root)
+        except ValueError:
+            continue
+        if not relative.parts or path.parent not in by_path:
+            continue
+        children.setdefault(path.parent, []).append(path)
+
+    selected = [report.root]
+    index = {report.root: 0}
+    position = 0
+    while position < len(selected):
+        path = selected[position]
+        for child in sorted(children.get(path, ()), key=lambda item: (-by_path[item].logical_bytes, str(item))):
+            if len(selected) >= _MAX_INTERACTIVE_DIRECTORIES:
+                break
+            index[child] = len(selected)
+            selected.append(child)
+        position += 1
+    nodes: list[dict[str, object]] = []
+    for path in selected:
+        item = by_path[path]
+        all_children = children.get(path, ())
+        child_total = sum(by_path[child].logical_bytes for child in all_children)
+        omitted_total = sum(by_path[child].logical_bytes for child in all_children if child not in index)
+        nodes.append({
+            "id": index[path],
+            "parent": None if path == report.root else index[path.parent],
+            "name": path.name,
+            "size": str(item.logical_bytes),
+            "direct": str(max(0, item.logical_bytes - child_total)),
+            "omitted": str(omitted_total),
+        })
+    return {
+        "root": str(report.root), "complete": report.complete,
+        "limit": _MAX_INTERACTIVE_DIRECTORIES,
+        "truncated": len(selected) < len(by_path), "nodes": nodes,
+    }
+
+
+def _json_for_html(value: dict[str, object]) -> str:
+    """Inert JSON safe from HTML script-element terminators and raw surrogates."""
+    serialized = json.dumps(value, ensure_ascii=True, separators=(",", ":"))
+    return (serialized.replace("<", r"\u003c").replace(">", r"\u003e")
+            .replace("&", r"\u0026").replace("\u2028", r"\u2028")
+            .replace("\u2029", r"\u2029"))
+
+
+def _interactive_markup(model: dict[str, object]) -> tuple[str, str]:
+    script_hash = base64.b64encode(hashlib.sha256(_DRILLDOWN_SCRIPT.encode("utf-8")).digest()).decode("ascii")
+    csp = ("default-src 'none'; script-src 'sha256-" + script_hash + "'; "
+           "connect-src 'none'; img-src 'none'; object-src 'none'; "
+           "style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'")
+    model_text = _json_for_html(model)
+    markup = (
+        '<section id="ocd-directory-drilldown" hidden aria-label="Interactive directory drilldown">'
+        '<h2>Directory drilldown (observed logical bytes)</h2>'
+        '<p class="meta">Keyboard: Tab to navigate, Enter/Space to open, Escape/Backspace to go up.</p>'
+        '<p id="ocd-drill-status" role="status" tabindex="-1" aria-live="polite"></p>'
+        '<nav aria-label="Directory breadcrumb"><button id="ocd-drill-home" type="button">Home</button>'
+        '<button id="ocd-drill-up" type="button">Up</button><div id="ocd-drill-crumbs"></div></nav>'
+        '<svg id="ocd-drill-svg" viewBox="0 0 1000 380" role="group" '
+        'aria-label="Clickable observed directory sizes"></svg>'
+        '<h3>Directory list (including zero-byte directories)</h3><ul id="ocd-drill-list"></ul>'
+        '</section>'
+        '<script id="ocd-directory-data" type="application/json">' + model_text + '</script>'
+        '<script>' + _DRILLDOWN_SCRIPT + '</script>'
+    )
+    return csp, markup
 
 
 def _tiles(report: UsageReport) -> list[tuple[str, int, float, float, float, float]]:
@@ -92,7 +328,7 @@ def _tiles(report: UsageReport) -> list[tuple[str, int, float, float, float, flo
 
 
 def render_usage_html(report: UsageReport) -> str:
-    """Produce a self-contained static HTML snapshot without opening any file."""
+    """Produce a self-contained HTML snapshot without opening any file."""
     state = "COMPLETE" if report.complete else "INCOMPLETE"
     state_class = "complete" if report.complete else "incomplete"
     allocated = (
@@ -149,14 +385,20 @@ def render_usage_html(report: UsageReport) -> str:
         if report.issues else ""
     )
 
-    # The CSP and lack of script/embed/link elements forbid active content and
-    # remote assets even when a scanned filename resembles HTML or JavaScript.
+    model = _interactive_model(report)
+    if model is None:
+        csp = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"
+        interactive_markup = ""
+    else:
+        csp, interactive_markup = _interactive_markup(model)
+
+    # Even when directory data is included, its serialized JSON is inert and
+    # the only executable script is pinned to an exact CSP SHA-256.
     return (
         "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
         "<meta http-equiv=\"Content-Security-Policy\" "
-        "content=\"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; "
-        "form-action 'none'\">"
+        f'content="{csp}">'
         "<title>OCD Usage — read-only snapshot</title>"
         "<style>body{font:16px system-ui,sans-serif;background:#101a26;color:#f1f5f9;"
         "margin:0 auto;max-width:1200px;padding:24px}h1{margin:0 0 10px}"
@@ -168,7 +410,21 @@ def render_usage_html(report: UsageReport) -> str:
         "border-collapse:collapse;table-layout:fixed}th,td{padding:10px;"
         "border-bottom:1px solid #405166;text-align:left;overflow-wrap:anywhere}"
         ".number{text-align:right;width:190px}.issues{color:#ffd4b9}"
-        ".empty{padding:48px;text-align:center;background:#192c3e}</style></head><body>"
+        ".empty{padding:48px;text-align:center;background:#192c3e}"
+        "#ocd-directory-drilldown{margin:18px 0;padding:16px;background:#192c3e;"
+        "border-radius:8px}#ocd-directory-drilldown nav{display:flex;gap:8px;"
+        "align-items:center;flex-wrap:wrap;margin-bottom:14px}"
+        "#ocd-drill-crumbs{display:flex;gap:5px;flex-wrap:wrap}"
+        "#ocd-directory-drilldown button{background:#234c68;color:white;"
+        "border:2px solid #79c6df;border-radius:5px;padding:6px 10px;"
+        "cursor:pointer}#ocd-directory-drilldown button:disabled{opacity:.4;"
+        "cursor:default}#ocd-directory-drilldown button:focus-visible,"
+        "#ocd-drill-svg [role=button]:focus-visible{outline:3px solid #ffd166;"
+        "outline-offset:3px}#ocd-drill-svg [role=button]{cursor:pointer}"
+        "#ocd-drill-list{list-style:none;padding:0}#ocd-drill-list li{padding:6px;"
+        "border-bottom:1px solid #405166;display:flex;gap:10px;"
+        "justify-content:space-between;flex-wrap:wrap}"
+        ".ocd-drill-size{font-variant-numeric:tabular-nums}</style></head><body>"
         "<h1>OCD — disk usage snapshot</h1>"
         f'<p class="meta">Selected root: <code>{_html(str(report.root))}</code></p>'
         f'<p class="status {state_class}">{state}</p>'
@@ -182,7 +438,8 @@ def render_usage_html(report: UsageReport) -> str:
         f'{report.skipped_links:,} links skipped; {report.skipped_special:,} special skipped. '
         f'Observed logical total: {_size(report.logical_bytes)}. '
         f'Physical allocation: {_html(allocated)}.</p>'
-        "<h2>Top-level groups</h2>" + diagram
+        '<h2>Top-level groups</h2><div id="ocd-static-treemap">' + diagram + '</div>'
+        + interactive_markup
         + "<h2>Largest observed files</h2><table><thead><tr>"
         "<th>File</th><th class=\"number\">Logical bytes</th>"
         "</tr></thead><tbody>" + rows + "</tbody></table>"
