@@ -139,6 +139,7 @@ _DRILLDOWN_SCRIPT = r"""'use strict';
       title.textContent = option.name + ': ' + fmt(option.size);
       rect.append(title);
       if (option.node) {
+        rect.setAttribute('data-drill-id', String(option.node.id));
         rect.setAttribute('role', 'button');
         rect.setAttribute('tabindex', '0');
         rect.setAttribute('aria-label', 'Open ' + option.name + ', ' + fmt(option.size));
