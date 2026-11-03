@@ -3,16 +3,22 @@
 from __future__ import annotations
 
 from contextlib import redirect_stderr, redirect_stdout
+import base64
+import hashlib
 from io import StringIO
+import json
 from pathlib import Path
 import os
+import re
+import shutil
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
 
 from ocd.cli import main
-from ocd.treemap import render_usage_html, write_usage_html
-from ocd.usage import UsageItem, UsageReport, scan_usage
+from ocd.treemap import _MAX_INTERACTIVE_DIRECTORIES, render_usage_html, write_usage_html
+from ocd.usage import DirectoryUsage, UsageItem, UsageReport, scan_usage
 
 
 class TreemapTests(unittest.TestCase):
@@ -62,6 +68,105 @@ class TreemapTests(unittest.TestCase):
             second = main(["usage", "--path", str(self.root), "--html", str(target)])
         self.assertNotEqual(second, 0)
         self.assertEqual(target.read_bytes(), original)
+
+    def test_html_cli_requests_recursive_directory_data_only_for_html(self):
+        folder = self.root / "nested"
+        folder.mkdir()
+        (folder / "f.bin").write_bytes(b"abc")
+        target = self.out / "drilldown.html"
+        with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+            self.assertEqual(main(["usage", "--path", str(self.root), "--html", str(target)]), 0)
+        html = target.read_text(encoding="utf-8")
+        self.assertIn('id="ocd-directory-drilldown" hidden', html)
+        self.assertIn('id="ocd-static-treemap"', html)
+        match = re.search(r'<script id="ocd-directory-data" type="application/json">([^<]*)</script>', html)
+        self.assertIsNotNone(match)
+        model = json.loads(match.group(1))
+        self.assertEqual([item["name"] for item in model["nodes"]][1:], ["nested"])
+        self.assertEqual(model["nodes"][0]["size"], "3")
+        self.assertEqual(model["nodes"][1]["size"], "3")
+        self.assertEqual(model["nodes"][0]["direct"], "0")
+        self.assertFalse(model["truncated"])
+        self.assertTrue(model["complete"])
+
+    def test_script_hash_exact_and_fails_closed_without_network_or_unsafe_script(self):
+        html = render_usage_html(scan_usage(self.root, include_hierarchy=True))
+        scripts = re.findall(r'<script(?: [^>]*)?>(.*?)</script>', html, flags=re.S)
+        self.assertEqual(len(scripts), 2)
+        digest = base64.b64encode(hashlib.sha256(scripts[1].encode("utf-8")).digest()).decode("ascii")
+        self.assertIn("script-src 'sha256-" + digest + "'", html)
+        self.assertNotIn("script-src 'unsafe-inline'", html)
+        self.assertIn("connect-src 'none'", html)
+        self.assertIn("object-src 'none'", html)
+        self.assertNotIn("fetch(", scripts[1])
+        self.assertNotIn("XMLHttpRequest", scripts[1])
+        self.assertNotIn("innerHTML", scripts[1])
+        self.assertNotIn("src=\"http", html)
+        self.assertIn('id="ocd-static-treemap"', html, "static fallback must remain present")
+        if shutil.which("node"):
+            checked = subprocess.run(["node", "--check"], input=scripts[1],
+                                     encoding="utf-8", capture_output=True)
+            self.assertEqual(checked.returncode, 0, checked.stderr)
+
+    def test_inert_model_escapes_html_terminators_and_odd_unicode(self):
+        fake_root = Path(str(self.root) + "</script>")
+        nasty = fake_root / "<svg onload=1>\u2028\u2029&\udcff"
+        report = UsageReport(
+            root=fake_root, entries_visited=1, files=0, directories=1,
+            skipped_links=0, skipped_special=0, logical_bytes=0,
+            allocated_bytes=None, largest_files=(), largest_children=(),
+            issues=(), complete=True,
+            directory_totals=(DirectoryUsage(fake_root, 0, None, True),
+                              DirectoryUsage(nasty, 0, None, True)),
+        )
+        html = render_usage_html(report)
+        data = re.search(r'<script id="ocd-directory-data" type="application/json">([^<]*)</script>', html)
+        self.assertIsNotNone(data, "untrusted JSON cannot terminate a script element")
+        self.assertNotIn("</script><svg", data.group(1))
+        self.assertIn(r"\u003c", data.group(1))
+        self.assertIn(r"\u0026", data.group(1))
+        self.assertNotIn("\udcff", html)
+        model = json.loads(data.group(1))
+        self.assertIn("</script>", model["root"])
+        self.assertIn("<svg", model["nodes"][1]["name"])
+        self.assertIn("\u2028", model["nodes"][1]["name"])
+
+    def test_bounded_directory_payload_discloses_truncation_and_partial_scan(self):
+        entries = (DirectoryUsage(self.root, 0, None, False),) + tuple(
+            DirectoryUsage(self.root / f"folder-{index:05d}", 0, None, False)
+            for index in range(_MAX_INTERACTIVE_DIRECTORIES + 25)
+        )
+        report = UsageReport(
+            root=self.root, entries_visited=1, files=0, directories=len(entries)-1,
+            skipped_links=0, skipped_special=0, logical_bytes=0,
+            allocated_bytes=None, largest_files=(), largest_children=(),
+            issues=("entry budget reached",), complete=False, directory_totals=entries,
+        )
+        html = render_usage_html(report)
+        data = re.search(r'<script id="ocd-directory-data" type="application/json">([^<]*)</script>', html)
+        self.assertIsNotNone(data)
+        model = json.loads(data.group(1))
+        self.assertEqual(len(model["nodes"]), _MAX_INTERACTIVE_DIRECTORIES)
+        self.assertTrue(model["truncated"])
+        self.assertFalse(model["complete"])
+        self.assertIn("INCOMPLETE", html)
+
+    def test_large_logical_bytes_preserve_exact_integer_labels(self):
+        huge = 9_007_199_254_740_993  # JS Number cannot represent this exactly.
+        report = UsageReport(
+            root=self.root, entries_visited=1, files=1, directories=0,
+            skipped_links=0, skipped_special=0, logical_bytes=huge,
+            allocated_bytes=None, largest_files=(), largest_children=(),
+            issues=(), complete=True,
+            directory_totals=(DirectoryUsage(self.root, huge, None, True),),
+        )
+        html = render_usage_html(report)
+        data = re.search(r'<script id="ocd-directory-data" type="application/json">([^<]*)</script>', html)
+        self.assertIsNotNone(data)
+        model = json.loads(data.group(1))
+        self.assertEqual(model["nodes"][0]["size"], str(huge))
+        self.assertEqual(model["nodes"][0]["direct"], str(huge))
+        self.assertIn("BigInt", html)
 
     def test_incomplete_bounded_scan_stays_visibly_incomplete(self):
         (self.root / "a.bin").write_bytes(b"a")
