@@ -52,7 +52,7 @@ class UsageHierarchyTests(unittest.TestCase):
             path: (path.read_bytes(), path.stat().st_mtime_ns)
             for path in self.root.rglob("*.bin")
         }
-        report = scan_usage(self.root, top=1)
+        report = scan_usage(self.root, top=1, include_hierarchy=True)
 
         self.assertTrue(report.complete, report.issues)
         self.assertEqual((report.files, report.directories, report.logical_bytes), (4, 4, 17))
@@ -79,7 +79,7 @@ class UsageHierarchyTests(unittest.TestCase):
         except (OSError, NotImplementedError) as exc:
             self.skipTest(f"hardlink unavailable: {exc}")
 
-        report = scan_usage(self.root)
+        report = scan_usage(self.root, include_hierarchy=True)
 
         self.assertTrue(report.complete, report.issues)
         self.assertEqual(report.files, 2)
@@ -110,7 +110,7 @@ class UsageHierarchyTests(unittest.TestCase):
         except (OSError, NotImplementedError) as exc:
             self.skipTest(f"symlinks unavailable: {exc}")
 
-        report = scan_usage(self.root)
+        report = scan_usage(self.root, include_hierarchy=True)
 
         self.assertTrue(report.complete, report.issues)
         self.assertEqual(report.skipped_links, 4)
@@ -123,7 +123,7 @@ class UsageHierarchyTests(unittest.TestCase):
         (chosen / "not-scanned.bin").write_bytes(b"data")
         (self.root / "z.bin").write_bytes(b"more")
 
-        report = scan_usage(self.root, max_entries=1)
+        report = scan_usage(self.root, max_entries=1, include_hierarchy=True)
 
         self.assertFalse(report.complete)
         self.assertLessEqual(report.entries_visited, 1)
@@ -147,7 +147,7 @@ class UsageHierarchyTests(unittest.TestCase):
         (deeper / "not-scanned.bin").write_bytes(b"hidden")
         (self.root / "visible.bin").write_bytes(b"yes")
 
-        report = scan_usage(self.root, max_depth=0)
+        report = scan_usage(self.root, max_depth=0, include_hierarchy=True)
 
         self.assertFalse(report.complete)
         self.assertTrue(any("depth budget" in issue for issue in report.issues))
@@ -180,6 +180,21 @@ class UsageHierarchyTests(unittest.TestCase):
             self.assertTrue(row["complete"])
             self.assertIsNone(row["allocated_bytes"])
         self.assertFalse(missing_config.exists())
+
+    def test_hierarchy_requires_explicit_opt_in(self):
+        child = self.root / "child"
+        child.mkdir()
+        (child / "data.bin").write_bytes(b"abcd")
+
+        ordinary = scan_usage(self.root)
+        hierarchical = scan_usage(self.root, include_hierarchy=True)
+
+        self.assertTrue(ordinary.complete, ordinary.issues)
+        self.assertEqual(ordinary.directory_totals, ())
+        self.assertEqual(ordinary.logical_bytes, 4)
+        self.assertTrue(hierarchical.complete, hierarchical.issues)
+        self.assertEqual(hierarchical.logical_bytes, ordinary.logical_bytes)
+        self.assert_directory_totals(hierarchical, {self.root: 4, child: 4})
 
 
 if __name__ == "__main__":
