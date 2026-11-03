@@ -73,6 +73,8 @@ def _parser() -> argparse.ArgumentParser:
     formats = usage.add_mutually_exclusive_group()
     formats.add_argument("--json", action="store_true",
                          help="print a machine-readable report, including completeness")
+    formats.add_argument("--hierarchy-json", action="store_true",
+                         help="print all observed directory totals; logical bytes, no deletion eligibility")
     formats.add_argument("--html", type=Path, metavar="ABSOLUTE_OUTPUT_FILE",
                          help="create a self-contained, no-overwrite HTML treemap outside the scan root")
 
@@ -310,7 +312,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"HTML REPORT {args.html!s}: "
                       f"{'complete' if report.complete else 'INCOMPLETE'}; "
                       "logical bytes only; no deletion or reclaimability claim")
-            elif args.json:
+            elif args.json or args.hierarchy_json:
                 import json
 
                 def as_item(item):
@@ -320,7 +322,7 @@ def main(argv: list[str] | None = None) -> int:
                         "allocated_bytes": item.allocated_bytes,
                     }
 
-                print(json.dumps({
+                payload = {
                     "root": str(report.root),
                     "complete": report.complete,
                     "entries_visited": report.entries_visited,
@@ -333,7 +335,15 @@ def main(argv: list[str] | None = None) -> int:
                     "largest_files": [as_item(item) for item in report.largest_files],
                     "largest_children": [as_item(item) for item in report.largest_children],
                     "issues": list(report.issues),
-                }, sort_keys=True))
+                }
+                if args.hierarchy_json:
+                    payload["directory_totals"] = [
+                        {**as_item(item), "complete": item.complete}
+                        for item in report.directory_totals
+                    ]
+                    payload["deletion_eligible"] = False
+                    payload["reclaimable_bytes"] = None
+                print(json.dumps(payload, sort_keys=True))
             else:
                 estimate = (
                     str(report.allocated_bytes) if report.allocated_bytes is not None
