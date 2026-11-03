@@ -158,10 +158,10 @@ _DRILLDOWN_SCRIPT = r"""'use strict';
       if (current !== 0) { event.preventDefault(); parent(); }
     }
   });
+  paint();
   stage.hidden = false;
   const staticChart = document.getElementById('ocd-static-treemap');
   if (staticChart) staticChart.hidden = true;
-  paint();
 })();"""
 
 
