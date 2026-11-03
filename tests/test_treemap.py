@@ -108,6 +108,16 @@ class TreemapTests(unittest.TestCase):
                                      encoding="utf-8", capture_output=True)
             self.assertEqual(checked.returncode, 0, checked.stderr)
 
+    def test_focus_return_keeps_list_and_svg_controls_distinct(self):
+        """Guard source contract until a real browser keyboard probe is available."""
+        html = render_usage_html(scan_usage(self.root, include_hierarchy=True))
+        script = re.findall(r'<script(?: [^>]*)?>(.*?)</script>', html, flags=re.S)[1]
+        self.assertIn("kind: 'list'", script)
+        self.assertIn("kind: 'tile'", script)
+        self.assertIn("saved.focusReturn.kind === 'tile' ? buttons.svg : buttons.list", script)
+        self.assertIn("scope.querySelectorAll('[data-drill-id]')", script)
+        self.assertNotIn("document.querySelector('[data-drill-id", script)
+
     def test_inert_model_escapes_html_terminators_and_odd_unicode(self):
         # Path() converts '/' to a separator on Windows, changing the hostile
         # string into '<\\script>'. A pure POSIX path preserves the literal
