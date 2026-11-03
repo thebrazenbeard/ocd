@@ -1,0 +1,36 @@
+name: Offline Treemap Browser Qualification
+
+on:
+  pull_request:
+    paths:
+      - "src/ocd/treemap.py"
+      - "src/ocd/usage.py"
+      - "src/ocd/cli.py"
+      - "scripts/verify_treemap_browser.cjs"
+      - ".github/workflows/treemap-browser-qualification.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  browser:
+    name: Chromium offline/CSP/keyboard probe
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install local Python source
+        run: python -m pip install -e .
+      - name: Install pinned Playwright test runner (CI only)
+        run: npm install --no-save --ignore-scripts --no-audit --no-fund playwright@1.56.1
+      - name: Install disposable Chromium test browser
+        run: npx playwright install --with-deps chromium
+      - name: Verify offline report in an actual browser
+        run: node scripts/verify_treemap_browser.cjs
