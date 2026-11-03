@@ -25,7 +25,7 @@ The goal is to make storage understandable and recoverable. A developer workstat
 
 For machine-learning workflows, the target architecture keeps **code, manifests, checksums, and retrieval instructions in Git**, large weights in an artifact/model store, and lets compute workers fetch only verified model files needed by a job. A developer workstation should not be the permanent model archive. This is the **intended workflow, not an existing OCD cloud-sync feature**.
 
-For the current private BT2 artifact releases, **uploaded is not restored**: the releases are still drafts, and GitHub only lists draft releases to accounts with push access. Do not give a read-only worker write credentials or evict the last Lappy copy. The private releases must first be authorized for publication without changing the repository's private visibility; then an independently authenticated worker must download, checksum, and successfully load each needed model. See [GitHub's release-access documentation](https://docs.github.com/en/rest/releases/releases).
+For a private model release, **published is not restored**: publication does not establish that a compute worker has access, that the downloaded bytes match the pinned manifest, or that a model can load. Draft releases additionally require publication authorization and generally are not visible to ordinary read-only consumers. Keep private releases private, use each worker's separately authorized read-only identity, and perform an independent hash-verified restore before evaluating source-copy eviction. Even a successful single-model load does not qualify an entire collection or authorize deletion. See [GitHub's release-access documentation](https://docs.github.com/en/rest/releases/releases).
 
 ### What works today
 
@@ -180,7 +180,7 @@ ocd artifact fetch --manifest ./artifacts.json \
 
 The fetcher verifies exact size and SHA-256 before no-overwrite publication. Linux uses POSIX anchored publication. An experimental native Windows publication path exists but **fails closed by default**. For disposable-fixture qualification only, an operator must deliberately set `OCD_EXPERIMENTAL_WINDOWS_ARTIFACT_PUBLISH=1` for the process; it has **not passed live NTFS/ReFS qualification** and must not be used for valuable files. The [manual native Windows qualification workflow](.github/workflows/ocd-native-windows-qualification.yml) keeps unfinished rename/publication tests separate from normal cross-platform source CI; these tests are not proof of a supported Windows mutation path. This **downloads** a named remote file; it cannot create cloud backups, upload weights, or synchronize locations.
 
-A native Lappy Windows disposable-fixture suite has now exercised the experimental anchored rename/publication primitives and passed six scenarios. This is not production qualification: Windows artifact publication remains off by default, and Windows organizing apply is still disabled.
+A separate native Windows disposable-fixture suite exercised the experimental anchored rename/publication primitives across six scenarios. This is not production qualification: Windows artifact publication remains off by default, and Windows organizing apply is still disabled.
 
 ### Verify a restored artifact independently (Windows/Linux, read-only)
 
@@ -198,7 +198,7 @@ ocd artifact verify --manifest ./artifacts.json \
   --destination-root /srv/job-artifacts --artifact models/example.gguf --json
 ```
 
-Successful verification returns `"verified": true` with the independently observed SHA-256 and byte count; failures return nonzero with `"verified": false`. Both responses state `"deletion_eligible": false` and `"reclaimable_bytes": null`. The verifier refuses unsafe links/reparse points, missing or changed files, and content mismatches. It does **not** create an artifact store, authenticate a worker to private GitHub Releases, prove future remote availability, or authorize eviction of the source copy. For private draft releases, arrange target-machine credentials and independently test retrieval before considering a separate deletion review.
+Successful verification returns `"verified": true` with the independently observed SHA-256 and byte count; failures return nonzero with `"verified": false`. Both responses state `"deletion_eligible": false` and `"reclaimable_bytes": null`. The verifier refuses unsafe links/reparse points, missing or changed files, and content mismatches. It does **not** create an artifact store, authenticate a worker to private GitHub Releases, prove future remote availability, or authorize eviction of the source copy. For private releases, arrange target-machine credentials and independently test retrieval before considering a separate deletion review.
 
 ### 5. Cache a verified artifact for on-demand use (POSIX source implementation)
 
