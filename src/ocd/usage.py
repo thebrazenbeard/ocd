@@ -58,6 +58,7 @@ class UsageReport:
 
 def scan_usage(
     root: Path, *, max_entries: int = 100_000, top: int = 20, max_depth: int = 32,
+    include_hierarchy: bool = False,
 ) -> UsageReport:
     """Inventory a selected root without following directory links.
 
@@ -73,6 +74,8 @@ def scan_usage(
         raise ValueError("top must be between 1 and 100")
     if type(max_depth) is not int or not 0 <= max_depth <= 64:
         raise ValueError("max_depth must be between 0 and 64")
+    if type(include_hierarchy) is not bool:
+        raise ValueError("include_hierarchy must be a boolean")
     original = root.lstat()
     if _is_link(original) or not stat.S_ISDIR(original.st_mode):
         raise ValueError("usage root must be a real directory, not a link or reparse point")
@@ -83,7 +86,7 @@ def scan_usage(
     allocated_known = os.name != "nt"
     identities: set[tuple[int, int]] = set()
     children: dict[Path, int] = {}
-    directory_bytes: dict[Path, int] = {root: 0}
+    directory_bytes: dict[Path, int] = {root: 0} if include_hierarchy else {}
     largest: list[UsageItem] = []
     issues: list[str] = []
     stack = [(root, 0, (original.st_dev, original.st_ino, original.st_mtime_ns))]
@@ -138,7 +141,8 @@ def scan_usage(
                 # This directory's scan-time identity is verified. A queued
                 # child may already have an observed-zero row, but the report
                 # stays incomplete if its contents could not be inspected.
-                directory_bytes.setdefault(directory, 0)
+                if include_hierarchy:
+                    directory_bytes.setdefault(directory, 0)
 
                 remaining = max_entries - entries
                 with os.scandir(handle) as stream:
@@ -169,7 +173,8 @@ def scan_usage(
                         # Preserve a discovered node for incomplete-scan
                         # visibility; zero is observed bytes, never proof of
                         # emptiness unless the complete flag is true.
-                        directory_bytes.setdefault(path, 0)
+                        if include_hierarchy:
+                            directory_bytes.setdefault(path, 0)
                         if depth >= max_depth:
                             issue(f"depth budget reached at {path}")
                         else:
@@ -181,12 +186,13 @@ def scan_usage(
                     files += 1
                     size = details.st_size
                     logical += size
-                    parent = path.parent
-                    while True:
-                        directory_bytes[parent] += size
-                        if parent == root:
-                            break
-                        parent = parent.parent
+                    if include_hierarchy:
+                        parent = path.parent
+                        while True:
+                            directory_bytes[parent] += size
+                            if parent == root:
+                                break
+                            parent = parent.parent
                     first = path.relative_to(root).parts
                     bucket = root / first[0] if len(first) > 1 else root
                     children[bucket] = children.get(bucket, 0) + size
