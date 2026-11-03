@@ -7,7 +7,7 @@ import base64
 import hashlib
 from io import StringIO
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import os
 import re
 import shutil
@@ -109,7 +109,10 @@ class TreemapTests(unittest.TestCase):
             self.assertEqual(checked.returncode, 0, checked.stderr)
 
     def test_inert_model_escapes_html_terminators_and_odd_unicode(self):
-        fake_root = Path(str(self.root) + "</script>")
+        # Path() converts '/' to a separator on Windows, changing the hostile
+        # string into '<\\script>'. A pure POSIX path preserves the literal
+        # HTML closing tag on both supported test platforms without I/O.
+        fake_root = PurePosixPath("/synthetic/observed</script>")
         nasty = fake_root / "<svg onload=1>\u2028\u2029&\udcff"
         report = UsageReport(
             root=fake_root, entries_visited=1, files=0, directories=1,
