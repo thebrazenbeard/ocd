@@ -77,8 +77,14 @@ _DRILLDOWN_SCRIPT = r"""'use strict';
     current = nodes[current].parent;
     paint();
     if (saved && saved.id === current && saved.focusReturn) {
-      const target = document.querySelector('[data-drill-id="' + saved.focusReturn + '"]');
-      if (target) { target.focus(); return; }
+      // Both list buttons and SVG tiles represent a directory. Restore focus
+      // to the *kind* of control used, never the first document-wide match.
+      const scope = saved.focusReturn.kind === 'tile' ? buttons.svg : buttons.list;
+      for (const target of scope.querySelectorAll('[data-drill-id]')) {
+        if (target.dataset.drillId === String(saved.focusReturn.id)) {
+          target.focus(); return;
+        }
+      }
     }
     buttons.up.focus();
   };
@@ -87,7 +93,7 @@ _DRILLDOWN_SCRIPT = r"""'use strict';
     const button = make('button', className, text);
     button.type = 'button';
     button.dataset.drillId = String(node.id);
-    button.addEventListener('click', () => enter(node.id, String(node.id)));
+    button.addEventListener('click', () => enter(node.id, { id: node.id, kind: 'list' }));
     return button;
   };
   const paint = () => {
@@ -136,10 +142,10 @@ _DRILLDOWN_SCRIPT = r"""'use strict';
         rect.setAttribute('role', 'button');
         rect.setAttribute('tabindex', '0');
         rect.setAttribute('aria-label', 'Open ' + option.name + ', ' + fmt(option.size));
-        rect.addEventListener('click', () => enter(option.node.id, String(option.node.id)));
+        rect.addEventListener('click', () => enter(option.node.id, { id: option.node.id, kind: 'tile' }));
         rect.addEventListener('keydown', event => {
           if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault(); enter(option.node.id, String(option.node.id));
+            event.preventDefault(); enter(option.node.id, { id: option.node.id, kind: 'tile' });
           }
         });
       }
