@@ -119,6 +119,8 @@ OCD can now inventory an **explicitly selected absolute directory or drive root*
 # Windows PowerShell: inspect C: and D: separately; no files are changed
 ocd usage --path C:\ --max-entries 100000 --top 20
 ocd usage --path D:\ --max-entries 100000 --top 20 --json
+# Optional recursive logical-byte directory rows; still read-only
+ocd usage --path D:\ --max-entries 100000 --hierarchy-json
 # Optional standalone HTML report written to C: outside the selected D: scan
 ocd usage --path D:\ --max-entries 100000 --top 20 --html "$env:USERPROFILE\ocd-d-report.html"
 ```
@@ -126,9 +128,12 @@ ocd usage --path D:\ --max-entries 100000 --top 20 --html "$env:USERPROFILE\ocd-
 ```sh
 # Linux: inspect a selected mounted directory
 ocd usage --path /srv/data --max-entries 100000 --top 20
+ocd usage --path /srv/data --hierarchy-json
 ```
 
 The results rank the largest observed files and immediate top-level groups. **Logical bytes are not reclaimable bytes.** On Windows, allocated size is reported as unknown; where POSIX allocation metadata exists, its deduplicated block estimate is still not proof of reclaimable storage. Links/reparse points and detected cross-device mount directories are excluded; inaccessible entries, depth limits, and exhausted budgets produce **incomplete** reports (nonzero exit code). Same-device bind mounts may be indistinguishable from ordinary directories. Windows pathname enumeration cannot yet guarantee safety against concurrent malicious junction swaps; use trusted, stable folders. A scan is a point-in-time observation and cannot authorize deletion. The optional `--html ABSOLUTE_OUTPUT_FILE` emits a **static, self-contained, no-network treemap** of observed top-level logical bytes and largest files, refuses to overwrite existing files, and requires the output path outside the selected scan root. HTML creation is an explicit write of the report file only; it never modifies scanned content. Use a trusted, stable output directory: Windows cannot yet protect against a malicious concurrent parent-junction swap. On write failure, a partial report may remain; OCD never unlinks that path because it may have been replaced. A scan of the filesystem root `/` on Linux cannot create an HTML report under the same filesystem-root rule because every absolute output path is inside `/`; use JSON/text instead. This is not a live GUI, a reclaimable-space estimate, or an automatic cleaner. Persistent indexing, cleanup-rule packs, and remote SSH/cloud exploration are **not implemented**.
+
+The optional `--hierarchy-json` report includes the root and observed nested directory rows (including empty directories), with inclusive observed logical totals and a `complete` flag on every row. When a scan limit or access problem is detected, every row is explicitly incomplete; zero observed bytes in an incomplete row do **not** establish an empty subtree. Per-directory allocated bytes remain unknown because hard links can span sibling folders. The report explicitly says `"deletion_eligible": false` and `"reclaimable_bytes": null`.
 
 ### Review cleanup observations without deleting (Windows/Linux)
 

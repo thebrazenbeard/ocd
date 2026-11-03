@@ -25,6 +25,21 @@ class UsageItem:
 
 
 @dataclass(frozen=True)
+class DirectoryUsage:
+    """Observed recursive logical bytes; physical allocation is not attributable.
+
+    Entries whose descendants could not all be scanned are conservative partial
+    observations. Individual directory allocations cannot be summed safely in
+    the presence of hardlinks spanning sibling directories.
+    """
+
+    path: Path
+    logical_bytes: int
+    allocated_bytes: int | None
+    complete: bool
+
+
+@dataclass(frozen=True)
 class UsageReport:
     root: Path
     entries_visited: int
@@ -38,10 +53,12 @@ class UsageReport:
     largest_children: tuple[UsageItem, ...]
     issues: tuple[str, ...]
     complete: bool
+    directory_totals: tuple[DirectoryUsage, ...] = ()
 
 
 def scan_usage(
     root: Path, *, max_entries: int = 100_000, top: int = 20, max_depth: int = 32,
+    include_hierarchy: bool = False,
 ) -> UsageReport:
     """Inventory a selected root without following directory links.
 
@@ -57,6 +74,8 @@ def scan_usage(
         raise ValueError("top must be between 1 and 100")
     if type(max_depth) is not int or not 0 <= max_depth <= 64:
         raise ValueError("max_depth must be between 0 and 64")
+    if type(include_hierarchy) is not bool:
+        raise ValueError("include_hierarchy must be a boolean")
     original = root.lstat()
     if _is_link(original) or not stat.S_ISDIR(original.st_mode):
         raise ValueError("usage root must be a real directory, not a link or reparse point")
@@ -67,6 +86,7 @@ def scan_usage(
     allocated_known = os.name != "nt"
     identities: set[tuple[int, int]] = set()
     children: dict[Path, int] = {}
+    directory_bytes: dict[Path, int] = {root: 0} if include_hierarchy else {}
     largest: list[UsageItem] = []
     issues: list[str] = []
     stack = [(root, 0, (original.st_dev, original.st_ino, original.st_mtime_ns))]
@@ -118,6 +138,12 @@ def scan_usage(
                     issue(f"directory identity or modification time changed: {directory}")
                     continue
 
+                # This directory's scan-time identity is verified. A queued
+                # child may already have an observed-zero row, but the report
+                # stays incomplete if its contents could not be inspected.
+                if include_hierarchy:
+                    directory_bytes.setdefault(directory, 0)
+
                 remaining = max_entries - entries
                 with os.scandir(handle) as stream:
                     names = [entry.name for entry in islice(stream, remaining + 1)]
@@ -144,6 +170,11 @@ def scan_usage(
                         continue
                     if stat.S_ISDIR(details.st_mode):
                         directories += 1
+                        # Preserve a discovered node for incomplete-scan
+                        # visibility; zero is observed bytes, never proof of
+                        # emptiness unless the complete flag is true.
+                        if include_hierarchy:
+                            directory_bytes.setdefault(path, 0)
                         if depth >= max_depth:
                             issue(f"depth budget reached at {path}")
                         else:
@@ -155,6 +186,13 @@ def scan_usage(
                     files += 1
                     size = details.st_size
                     logical += size
+                    if include_hierarchy:
+                        parent = path.parent
+                        while True:
+                            directory_bytes[parent] += size
+                            if parent == root:
+                                break
+                            parent = parent.parent
                     first = path.relative_to(root).parts
                     bucket = root / first[0] if len(first) > 1 else root
                     children[bucket] = children.get(bucket, 0) + size
@@ -203,10 +241,18 @@ def scan_usage(
         UsageItem(path, size, None)
         for path, size in sorted(children.items(), key=lambda item: (-item[1], str(item[0])))[:top]
     )
+    complete = not issues and not stopped
+    directory_totals = tuple(
+        DirectoryUsage(path, size, None, complete)
+        for path, size in sorted(
+            directory_bytes.items(),
+            key=lambda entry: (entry[0] != root, str(entry[0])),
+        )
+    )
     return UsageReport(
         root=root, entries_visited=entries, files=files, directories=directories,
         skipped_links=links, skipped_special=special, logical_bytes=logical,
         allocated_bytes=allocated if allocated_known else None,
         largest_files=tuple(largest), largest_children=largest_children,
-        issues=tuple(issues), complete=not issues and not stopped,
+        issues=tuple(issues), complete=complete, directory_totals=directory_totals,
     )
