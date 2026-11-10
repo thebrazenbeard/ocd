@@ -8,4 +8,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Reject hidden workspace startup execution
-        run: python3 -m unittest discover -s tests -p test_workspace_startup_safety.py -v
+        run: |
+          python3 tools/check_editor_startup.py .
+          python3 -m unittest discover -s tests -p test_workspace_startup_safety.py -v
+          python3 -m unittest discover -s tools -p test_editor_startup_guard.py -v
+          python3 -O tools/check_editor_startup.py .
+          python3 -O -m unittest discover -s tools -p test_editor_startup_guard.py -v
