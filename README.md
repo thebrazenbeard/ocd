@@ -238,3 +238,9 @@ Optional [observe-only startup templates](packaging/README.md) can launch the po
 For the component boundaries and security design, read [Architecture](docs/ARCHITECTURE.md); for what has actually been tested, read [Qualification](docs/QUALIFICATION.md); for the unfinished installed/cloud product, read [Product vision and delivery milestones](docs/PRODUCT_VISION.md).
 
 The repository previously contained a disguised executable invoked by a VS Code startup task; the task and payload were removed in a security fix. Do not run copies from old revisions. See [Qualification](docs/QUALIFICATION.md#repository-startup-security-note) for the scope of that finding.
+
+## Editor startup containment — tracked source (2026-11-20)
+
+The tracked `main` source formerly contained a concealed VS Code `folderOpen` task invoking obfuscated `.vscode/ini` through Node. The task list is now empty, `task.allowAutomaticTasks` is explicitly `"off"`, and the obfuscated file is removed from this source tree. Historical Git source remains for investigation.
+
+**Limits:** This is source-only containment, not proof that older checkouts, editor extensions, user/global settings, local credentials, or any previous host execution are safe. Do not execute historical suspect assets.
